@@ -1,5 +1,5 @@
 index,JobTitle,SalaryEstimate,JobDescription,Rating,CompanyName,Location,Headquarters,Size,Founded,Typeofownership,Industry,Sector,Revenue,Competitors,Hourly,Employer provided,Lower Salary,Upper Salary,AvgSalary,company_txt,JobLocation,Age,Python,spark,aws,excel,sql,sas,keras,pytorch,scikit,tensor,hadoop,tableau,bi,flink,mongo,google_an,job_title_sim,seniority_by_title,Degree
-999,A N/A,$$$,,0,,,,,,,,,,,0,0,0,0,0,0,A N/A,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, ,na, na
+999,A N/A,$$$,,0,,,,,,,,,,,0,0,0,0,$$$,0,A N/A,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, ,na, na
 0,Data Scientist,$53K-$91K (Glassdoor est.),"Data Scientist
 Location: Albuquerque, NM
 Education Required: Bachelor’s degree required, preferably in math, engineering, business, or the sciences.
