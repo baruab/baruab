@@ -153,6 +153,8 @@ Add geo features to the data based on IP address information. Map the IP address
 access_log_location_url = 'https://raw.githubusercontent.com/baruab/baruab/refs/heads/main/DATA_698/tokenized_access_logs_global.csv'
 df_ac_log = pd.read_csv(access_log_location_url)
 
+df_ac_log.nunique()
+
 df_ac_log = df_ac_log.drop_duplicates()
 df_ac_log.duplicated().sum()
 
@@ -534,19 +536,67 @@ x= df_product_features.to_numpy()
 print(x)
 print(x.shape)
 
+import torch # Import the torch library
+
+# Convert to PyTorch tensors
 user_features = user_node_features.values.transpose()
 user_features = torch.tensor(user_features, dtype=torch.long)
 
 product_features = df_product_features.values.transpose()
 product_features = torch.tensor(product_features, dtype=torch.long)
 
-print(user_features)
+print(user_node_features)
+#print(user_features)
 print(user_features.shape)
 
 #print(product_features)
 #print(product_features.shape)
 
 user_node_features["buy_count"].hist()
+
+df_ac_log.info()
+
+print(df_ac_log['ip_id'])
+
+# group by Dt and AddToCart sum to create View and Buy ratio by Day
+
+# Merge date and ip columns to create new column in df_ac_log
+df_ac_log['date_ip_id'] = df_ac_log['date'].astype(str) + '_' + df_ac_log['ip_id'].astype(str)
+#df_ac_log.head()
+
+df_ac_log.groupby(["Dt", "AddToCart"]).count()
+
+# Add ratio of counts by AddToCart flag in a new column
+
+df_ac_log['view_ratio'] = (
+    df_ac_log.groupby(["date_ip_id", "AddToCart"])['Product'].transform('count') /
+    df_ac_log.groupby(["date_ip_id"])['Product'].transform('count')
+)
+
+df_ac_log['buy_ratio'] = 1 - df_ac_log['view_ratio']
+df_ac_log.head()
+
+### Scratch work to understand data
+## edge_index where AddToCart == 1
+df_buy_edge= df_ac_log[df_ac_log["AddToCart"] == 1]
+#df_buy_edge.head()
+
+edge_index = df_buy_edge[["ip_id", "Product_Id", "Dt","AddToCart"]]
+#edge_index.head()
+
+# edge_index group by Dt count
+edge_index.groupby("Dt").count()
+
+#len(edge_index)
+
+
+## edge_index where AddToCart == 0
+df_view_edge= df_ac_log[df_ac_log["AddToCart"] == 0]
+len(df_view_edge)
+
+# edge_index group by Dt count where Dt is 9/1/2017 and AddToCart is 1
+
+df_ac_log[(df_ac_log["Dt"] == "9/1/2017") & (df_ac_log["AddToCart"] == 0)].groupby("Dt").count()
 
 """Creating the Edge index"""
 
@@ -750,6 +800,12 @@ plt.show()
 # Merge date and ip columns to create new column in df_ac_log
 df_ac_log['date_ip'] = df_ac_log['date'].astype(str) + '_' + df_ac_log['ip'].astype(str)
 #df_ac_log.head()
+
+"""Create Edge information with timestamps. The discrete time interval is set by date"""
+
+print data
+
+# Original edge information with timestamps
 
 # Split the dataframe by date and ip address simulating temporal behaviour of the users on the website
 
