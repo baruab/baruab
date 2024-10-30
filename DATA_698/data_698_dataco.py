@@ -148,7 +148,6 @@ Add geo features to the data based on IP address information. Map the IP address
 
 ## In the interest of saving time, calling the API multiple times, as the information is of static nature
 ##   the generated file with added columns is saved and read directly to save compute time
-## Note: The file was truncated in size >100 KB, filtered for US only to upload in Github
 
 access_log_location_url = 'https://raw.githubusercontent.com/baruab/baruab/refs/heads/main/DATA_698/tokenized_access_logs_global.csv'
 df_ac_log = pd.read_csv(access_log_location_url)
@@ -360,7 +359,7 @@ print(max(df_ac_log['Dt']))
 
 """As there are a lot of categorical columns with many uniques values, let's subset the dataframe"""
 
-df_ac_cat_subset = df_ac_log[["Department", "Dt", "State"]]
+df_ac_cat_subset = df_ac_log[["Category", "Dt", "State"]]
 
 df_ac_cat_subset['Dt'].value_counts()
 
@@ -419,6 +418,7 @@ print(type(map_ip))
 
 df_ac_log['ip_id'] = df_ac_log['ip'].map(map_ip)
 
+print(len(ipaddrs))
 #df_ac_log.head()
 
 # Reassign the Product to IDs (make it easier later for creating edges)
@@ -432,7 +432,7 @@ df_ac_log['Product_Id'] = df_ac_log['Product'].map(map_prod)
 
 df_ac_log.head()
 
-#df_ac_log.info()
+df_ac_log.info()
 
 """**Based on the dataset, this will be a Heterogenous Graph comprising of Users(IP address) nodes and Product nodes, the edges will be represented as the buy intend (add_to_cart attribute)**
 
@@ -442,21 +442,21 @@ df_ac_log.head()
 #Let's start with the Product Node, create a subset dataframe.
 #It will have Product_Id, Category, Department, url
 
-df_product_nodes = df_ac_log[['Product_Id', 'Category']] #, 'Department', 'url']]
-df_product_nodes.head()
+df_product = df_ac_log[['Product_Id', 'Category']] #, 'Department', 'url']]
+df_product.head()
 
 # select Product node features
-df_product_nodes = df_product_nodes.drop_duplicates()
+df_product = df_product.drop_duplicates()
 
-df_product_nodes = df_product_nodes.reset_index(drop=True)
-df_product_nodes.head()
-print(len(df_product_nodes))
+df_product = df_product.reset_index(drop=True)
+df_product.head()
+print(len(df_product))
 
 # Create a dictionary to store node features
 node_features = {}
 
 # Iterate through the rows of the dataframe
-for index, row in df_product_nodes.iterrows():
+for index, row in df_product.iterrows():
     # Get the product ID
     product_id = row['Product_Id']
     # Create a feature vector for the node
@@ -479,38 +479,70 @@ from sklearn.preprocessing import OneHotEncoder
 
 #Extract categorical columns from the dataframe
 #Here we extract the columns with object datatype as they are the categorical columns
-categorical_columns = df_product_nodes.select_dtypes(include=['object']).columns.tolist()
+categorical_columns = df_product.select_dtypes(include=['object']).columns.tolist()
 
 #Initialize OneHotEncoder
 encoder = OneHotEncoder(sparse_output=False)
 
 # Apply one-hot encoding to the categorical columns
-one_hot_encoded = encoder.fit_transform(df_product_nodes[categorical_columns])
+one_hot_encoded = encoder.fit_transform(df_product[categorical_columns])
 
 #Create a DataFrame with the one-hot encoded columns
 #We use get_feature_names_out() to get the column names for the encoded data
 one_hot_df = pd.DataFrame(one_hot_encoded, columns=encoder.get_feature_names_out(categorical_columns))
 
 # Concatenate the one-hot encoded dataframe with the original dataframe
-df_encoded = pd.concat([df_product_nodes, one_hot_df], axis=1)
+df_encoded = pd.concat([df_product, one_hot_df], axis=1)
 
 # Drop the original categorical columns
-df_product_features = df_encoded.drop(categorical_columns, axis=1)
+df_product_1hotfeatures = df_encoded.drop(categorical_columns, axis=1)
 
 # Display the resulting dataframe
-print(f"Encoded data : \n{df_product_features}")
+print(f"Encoded data : \n{df_product_1hotfeatures}")
 
-df_product_features.head()
+df_product_1hotfeatures.head()
 
 # Convert to numpy
-x = df_product_features.to_numpy()
+x = df_product_1hotfeatures.to_numpy()
 print(x)
 print(x.shape)
 
+"""As there are lot of Categories, one-hot encoding will not be effecient. Switching to Label encoding for Category"""
+
+!pip install torch # install torch library
+
+import torch
+from sklearn.preprocessing import LabelEncoder
+
+# Label encode the 'Category' column
+label_encoder = LabelEncoder()
+
+#Extract categorical columns from the dataframe
+#Here we extract the columns with object datatype as they are the categorical columns
+categorical_columns = df_ac_cat_subset.select_dtypes(include=['object']).columns.tolist()
+
+print(categorical_columns)
+
+# get unique category names
+category_labels = label_encoder.fit_transform(df_ac_cat_subset['Category'].unique())
+print(category_labels)
+
+category_labels_tensor = torch.tensor(category_labels, dtype=torch.long).view(-1, 1)
+
+product_features = category_labels_tensor
+print(product_features)
+#data['product'].x = product_features
+
 """**Create User Node and Features**"""
 
+# group by ip_id and city
+#df_ac_log.groupby(["ip_id", "city"]).count()
+
+access_count = df_ac_log.groupby("ip_id")["date_id"].count().rename("access_count")
+print(access_count)
+
 #Let's create the User Node, create a subset dataframe.
-# User features can be their access count and buy intend count
+# Add user city, access count and buy intent count
 
 access_count = df_ac_log.groupby("ip_id")["date_id"].count().rename("access_count")
 buy_count = df_ac_log[df_ac_log["AddToCart"] == 1].groupby("ip_id")["AddToCart"].count().rename("buy_count")
@@ -522,20 +554,79 @@ user_node_features.head()
 user_id_mapping = user_node_features['ip_id']
 
 # Only keep user features
-user_node_features = user_node_features.drop('ip_id', axis=1)
+#user_node_features = user_node_features.drop('ip_id', axis=1)
 user_node_features.head()
 
-user_id_mapping.head()
+#print(len(user_node_features))
+
+"""Create a subset dataframe of ip_id and City"""
+
+df_ip_city = df_ac_log[['ip_id', 'City', 'State', 'Country']]
+df_ip_city = df_ip_city.drop_duplicates()
+df_ip_city.head()
+print(len(df_ip_city))
+
+# concat df_ip_city to user_node_features
+# join user_node_features and df_ip_city by ip_id
+
+df_user_features = pd.merge(user_node_features, df_ip_city, on='ip_id')
+
+#df_user_features = pd.concat([user_node_features, df_ip_city], axis=1)
+
+# subset df_user_features with unique ip_id
+df_user_features = df_user_features.drop_duplicates()
+df_user_features.head()
+#print(len(df_user_features))
+
+#user_ids
+user_ids = torch.tensor(df_user_features['ip_id'].values, dtype=torch.long)
+print(user_ids)
+print(user_ids.shape)
+
+# One-hot encode 'City'
+city_one_hot = pd.get_dummies(df_user_features['City'])
+
+# Convert access_count to a tensor
+access_count_tensor = torch.tensor(df_user_features['access_count'].values, dtype=torch.float).view(-1, 1)
+
+# Convert buy_count to a tensor
+buy_count_tensor = torch.tensor(df_user_features['buy_count'].values, dtype=torch.float).view(-1, 1)
+
+# Convert one-hot encoded features to tensors
+city_tensor = torch.tensor(city_one_hot.values, dtype=torch.float)
+
+# Concatenate access_count, buy_count and city tensors to form user features
+user_features = torch.cat([access_count_tensor, buy_count_tensor, city_tensor], dim=1)
+
+print(product_features)
+print(product_features.shape)
+
+print(len(df_product_1hotfeatures))
+
+"""Initialize the HeteroData object"""
+
+!pip install torch-geometric torch-sparse torch-scatter
+# Import the necessary library
+from torch_geometric.data import HeteroData
+
+hdata = HeteroData()
+hdata['user'].num_nodes = len(user_node_features)
+hdata['product'].num_nodes = len(df_product_1hotfeatures)
+hdata['user'].x = user_features
+hdata['product'].x = product_features
+hdata['user'].ids = user_ids
+
+product_ids = torch.tensor(df_product_1hotfeatures['Product_Id'].values, dtype=torch.long)
+hdata['product'].ids = product_ids
+
+print(hdata)
 
 # Convert to numpy
 x = user_node_features.to_numpy()
 print(x)
 print(x.shape)
 
-x= df_product_features.to_numpy()
-print(x)
-print(x.shape)
-
+"""
 import torch # Import the torch library
 
 # Convert to PyTorch tensors
@@ -551,12 +642,9 @@ print(user_features.shape)
 
 #print(product_features)
 #print(product_features.shape)
+"""
 
 user_node_features["buy_count"].hist()
-
-df_ac_log.info()
-
-print(df_ac_log['ip_id'])
 
 # group by Dt and AddToCart sum to create View and Buy ratio by Day
 
@@ -575,6 +663,9 @@ df_ac_log['view_ratio'] = (
 
 df_ac_log['buy_ratio'] = 1 - df_ac_log['view_ratio']
 df_ac_log.head()
+
+df_ac_log.info()
+print(df_ac_log['Date'])
 
 ### Scratch work to understand data
 ## edge_index where AddToCart == 1
@@ -598,11 +689,58 @@ len(df_view_edge)
 
 df_ac_log[(df_ac_log["Dt"] == "9/1/2017") & (df_ac_log["AddToCart"] == 0)].groupby("Dt").count()
 
-"""Creating the Edge index"""
+"""Define and create the Edge relationships and interactions
+Attributes used are ip_id(user), Product_Id, view_ratio, buy_ratio, AddToCart, Date
+"""
 
 !pip install torch # Install the PyTorch library
 import torch # Import the torch module
 
+# Seperate by buy vs view using AddToCart flag
+buy_edge_index=[]
+buy_timestamp=[]
+
+view_edge_index=[]
+view_timestamp=[]
+
+#Iterate the dataframe
+for index, row in df_ac_log.iterrows():
+
+  timestamp = datetime.strptime(row["Date"],'%m/%d/%Y %H:%M')
+  ts_unix = int(timestamp.timestamp())
+
+  if row["AddToCart"] == 1:
+    buy_edge_index.append([row["ip_id"], row["Product_Id"]])
+    buy_timestamp.append(ts_unix)
+  else:
+    view_edge_index.append([row["ip_id"], row["Product_Id"]])
+    view_timestamp.append(ts_unix)
+
+# Convert to tensor and add to HeteroData
+buy_edge_index = torch.tensor(buy_edge_index, dtype=torch.long).t().contiguous()
+buy_timestamp = torch.tensor(buy_timestamp, dtype=torch.long)
+hdata['user', 'buy', 'product'].edge_index = buy_edge_index
+hdata['user', 'buy', 'product'].edge_attr = buy_timestamp
+
+view_edge_index = torch.tensor(view_edge_index, dtype=torch.long).t().contiguous()
+view_timestamp = torch.tensor(view_timestamp, dtype=torch.long)
+hdata['user', 'view', 'product'].edge_index = view_edge_index
+hdata['user', 'view', 'product'].edge_attr = view_timestamp
+
+buy_ratio = torch.tensor(df_ac_log['buy_ratio'].values, dtype=torch.float)
+view_ratio = torch.tensor(df_ac_log['view_ratio'].values, dtype=torch.float)
+
+
+hdata['user', 'buy_ratio', 'product'].edge_attr = buy_ratio
+hdata['user', 'view_ratio', 'product'].edge_attr = view_ratio
+
+
+print(hdata)
+
+
+
+
+"""
 ## edge_index where AddToCart == 1
 df_buy_edge= df_ac_log[df_ac_log["AddToCart"] == 1]
 df_buy_edge.head()
@@ -611,6 +749,7 @@ edge_index = df_buy_edge[["ip_id", "Product_Id"]].values.transpose()
 edge_index = torch.tensor(edge_index, dtype=torch.long)
 print(edge_index)
 print(edge_index.shape)
+"""
 
 """**Build the Heterogeneous graph data object**"""
 
