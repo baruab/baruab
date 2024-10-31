@@ -359,9 +359,9 @@ print(max(df_ac_log['Dt']))
 
 """As there are a lot of categorical columns with many uniques values, let's subset the dataframe"""
 
-df_ac_cat_subset = df_ac_log[["Category", "Dt", "State"]]
+df_ac_cat_subset = df_ac_log[["Category", "Department"]]
 
-df_ac_cat_subset['Dt'].value_counts()
+df_ac_cat_subset['Department'].value_counts()
 
 print(len(df_ac_cat_subset))
 
@@ -502,14 +502,25 @@ print(f"Encoded data : \n{df_product_1hotfeatures}")
 
 df_product_1hotfeatures.head()
 
+!pip install torch # Install torch if you haven't already
+
+import torch # import torch module
+
 # Convert to numpy
 x = df_product_1hotfeatures.to_numpy()
 print(x)
 print(x.shape)
 
-"""As there are lot of Categories, one-hot encoding will not be effecient. Switching to Label encoding for Category"""
+print(type(x))
 
-!pip install torch # install torch library
+# convert x into tensor
+product_features = torch.tensor(x, dtype=torch.float)
+print(product_features)
+print(product_features.shape)
+
+"""As there are lot of Categories, one-hot encoding will not be effecient. Switching to Label encoding for Category
+Extending the logic to encode Department too
+"""
 
 import torch
 from sklearn.preprocessing import LabelEncoder
@@ -529,8 +540,16 @@ print(category_labels)
 
 category_labels_tensor = torch.tensor(category_labels, dtype=torch.long).view(-1, 1)
 
-product_features = category_labels_tensor
-print(product_features)
+product_cat_features = category_labels_tensor
+print(product_cat_features)
+
+# get unique department names
+dept_labels = label_encoder.fit_transform(df_ac_cat_subset['Department'].unique())
+print(dept_labels)
+
+dept_labels_tensor = torch.tensor(dept_labels, dtype=torch.long).view(-1, 1)
+product_y = dept_labels_tensor
+
 #data['product'].x = product_features
 
 """**Create User Node and Features**"""
@@ -598,6 +617,15 @@ city_tensor = torch.tensor(city_one_hot.values, dtype=torch.float)
 # Concatenate access_count, buy_count and city tensors to form user features
 user_features = torch.cat([access_count_tensor, buy_count_tensor, city_tensor], dim=1)
 
+# Concatenate access_count, buy_count and city tensors to form user features
+user_features = torch.cat([access_count_tensor], dim=1)
+
+# One-hot encode 'State'
+state_one_hot = pd.get_dummies(df_user_features['State'])
+user_y = torch.tensor(state_one_hot.values, dtype=torch.float)
+
+print(user_features)
+print(user_features.shape)
 print(product_features)
 print(product_features.shape)
 
@@ -611,13 +639,16 @@ from torch_geometric.data import HeteroData
 
 hdata = HeteroData()
 hdata['user'].num_nodes = len(user_node_features)
-hdata['product'].num_nodes = len(df_product_1hotfeatures)
 hdata['user'].x = user_features
-hdata['product'].x = product_features
 hdata['user'].ids = user_ids
+hdata['user'].y = user_y
 
+
+hdata['product'].num_nodes = len(df_product_1hotfeatures)
+hdata['product'].x = product_features
 product_ids = torch.tensor(df_product_1hotfeatures['Product_Id'].values, dtype=torch.long)
 hdata['product'].ids = product_ids
+hdata['product'].y = product_y
 
 print(hdata)
 
@@ -667,7 +698,7 @@ df_ac_log.head()
 df_ac_log.info()
 print(df_ac_log['Date'])
 
-### Scratch work to understand data
+"""### Scratch work to understand data
 ## edge_index where AddToCart == 1
 df_buy_edge= df_ac_log[df_ac_log["AddToCart"] == 1]
 #df_buy_edge.head()
@@ -689,11 +720,11 @@ len(df_view_edge)
 
 df_ac_log[(df_ac_log["Dt"] == "9/1/2017") & (df_ac_log["AddToCart"] == 0)].groupby("Dt").count()
 
-"""Define and create the Edge relationships and interactions
+Define and create the Edge relationships and interactions
 Attributes used are ip_id(user), Product_Id, view_ratio, buy_ratio, AddToCart, Date
 """
 
-!pip install torch # Install the PyTorch library
+# !pip install torch # Install the PyTorch library
 import torch # Import the torch module
 
 # Seperate by buy vs view using AddToCart flag
@@ -703,11 +734,14 @@ buy_timestamp=[]
 view_edge_index=[]
 view_timestamp=[]
 
+ratio_edge_index=[]
+
 #Iterate the dataframe
 for index, row in df_ac_log.iterrows():
 
   timestamp = datetime.strptime(row["Date"],'%m/%d/%Y %H:%M')
   ts_unix = int(timestamp.timestamp())
+  ratio_edge_index.append([row["ip_id"], row["Product_Id"]])
 
   if row["AddToCart"] == 1:
     buy_edge_index.append([row["ip_id"], row["Product_Id"]])
@@ -720,23 +754,41 @@ for index, row in df_ac_log.iterrows():
 buy_edge_index = torch.tensor(buy_edge_index, dtype=torch.long).t().contiguous()
 buy_timestamp = torch.tensor(buy_timestamp, dtype=torch.long)
 hdata['user', 'buy', 'product'].edge_index = buy_edge_index
+### add edge_type attribute
+hdata['user', 'buy', 'product'].edge_type = 'buy'
+
 hdata['user', 'buy', 'product'].edge_attr = buy_timestamp
 
 view_edge_index = torch.tensor(view_edge_index, dtype=torch.long).t().contiguous()
 view_timestamp = torch.tensor(view_timestamp, dtype=torch.long)
 hdata['user', 'view', 'product'].edge_index = view_edge_index
+### add edge_type attribute
+hdata['user', 'view', 'product'].edge_type = 'view'
 hdata['user', 'view', 'product'].edge_attr = view_timestamp
 
 buy_ratio = torch.tensor(df_ac_log['buy_ratio'].values, dtype=torch.float)
 view_ratio = torch.tensor(df_ac_log['view_ratio'].values, dtype=torch.float)
 
+# add edge index to user buy_ratio product
+ratio_edge_index = torch.tensor(ratio_edge_index, dtype=torch.long).t().contiguous()
 
+#add tensor for ratio_edge_index
+ratio_edge_index = torch.tensor(ratio_edge_index, dtype=torch.long).t().contiguous()
+
+hdata['user', 'buy_ratio', 'product'].edge_index = ratio_edge_index
+# add edge_type
+hdata['user', 'buy_ratio', 'product'].edge_type = 'buy_ratio'
 hdata['user', 'buy_ratio', 'product'].edge_attr = buy_ratio
+
+hdata['user', 'view_ratio', 'product'].edge_index = ratio_edge_index
+# add edge_type
+hdata['user', 'view_ratio', 'product'].edge_type = 'view_ratio'
 hdata['user', 'view_ratio', 'product'].edge_attr = view_ratio
 
 
 print(hdata)
-
+print(buy_edge_index)
+print(buy_edge_index.shape)
 
 
 
@@ -751,7 +803,315 @@ print(edge_index)
 print(edge_index.shape)
 """
 
-"""**Build the Heterogeneous graph data object**"""
+print(edge_index)
+print(edge_index.shape)
+
+"""Splitting the Heterogeneous Graph into test and train"""
+
+edge_index = torch.cat([hdata['user', 'view', 'product'].edge_index, hdata['user', 'buy', 'product'].edge_index], dim=1)
+
+# Create a mapping from edge type to numerical index
+edge_type_mapping = {
+    ('user', 'buy', 'product'): 0,
+    ('user', 'view', 'product'): 1,
+}
+
+# Create edge_type tensor based on the mapping
+edge_type = torch.tensor([edge_type_mapping[tuple(et)] for et in edge_types], dtype=torch.long)
+
+print(edge_type)
+
+edge_types = [('user', 'buy', 'product'), ('user', 'view', 'product')]
+
+"""Split the Graph Edges for link prediction"""
+
+from torch_geometric.transforms import RandomLinkSplit
+from torch_geometric.data import HeteroData
+
+
+# Perform a graph-aware split into train/val/test sets
+transform = RandomLinkSplit(
+    is_undirected=True,
+    add_negative_train_samples=True,
+    edge_types=edge_types  # Add this line to specify edge types
+)
+train_data, val_data, test_data = transform(hdata)
+
+#print number of nodes and edges in the graph
+# Finding the number of nodes for each node type
+for node_type in test_data.node_types:
+    num_nodes = test_data[node_type].num_nodes
+    print(f"Number of nodes in {node_type}: {num_nodes}")
+
+# Iterate over the edge types in the training data and handle potential missing edge indices.
+for edge_type in train_data.edge_types:
+    edge_index = train_data[edge_type].get('edge_index')
+    # Check if the edge_index is present for this edge type
+    if edge_index is not None:
+        train_edge_count = edge_index.size(1)
+        print(f"Number of edges in train graph for {edge_type}: {train_edge_count}")
+    else:
+        print(f"Edge index is not available for edge type: {edge_type} in training data")
+
+    # Similarly, handle missing edge indices for the testing data
+    edge_index = test_data[edge_type].get('edge_index')
+    if edge_index is not None:
+        test_edge_count = edge_index.size(1)
+        print(f"Number of edges in test graph for {edge_type}: {test_edge_count}")
+    else:
+        print(f"Edge index is not available for edge type: {edge_type} in testing data")
+
+"""Split the graph by node index for node classification"""
+
+from torch_geometric.transforms import RandomNodeSplit
+from torch_geometric.data import HeteroData
+import torch
+
+# Split the nodes for the "user" node type for a node classification task
+transform = RandomNodeSplit(split="train_rest")  # num_classes is just an example
+htdata = transform(hdata)
+
+# Access the train_mask for the specific node type (e.g., 'user')
+train_count = htdata['user'].train_mask.sum().item()
+val_count = htdata['user'].val_mask.sum().item()
+test_count = htdata['user'].test_mask.sum().item()
+
+print(f"Training nodes: {train_count}")
+print(f"Validation nodes: {val_count}")
+print(f"Testing nodes: {test_count}")
+
+print(edge_index)
+
+"""**Hurray ! We have created the Heterogeneous Graph, verified the node counts for User & Product which matches the inital dataframe unique count values**
+
+The edge relationships are now defined, can be expanded upon later if needed
+Also we have split the Graph for testing, training and evaluation purposes
+
+Now let's define the GNN layers using our HeteroData
+"""
+
+edge_index = torch.cat([hdata['user', 'buy', 'product'].edge_index, hdata['user', 'view', 'product'].edge_index], dim=1)
+
+# Create a mapping from edge type to numerical index
+edge_type_mapping = {
+    ('user', 'buy', 'product'): 0,
+    ('user', 'view', 'product'): 1,
+}
+
+# Create edge_type tensor based on the mapping
+edge_type = torch.tensor([edge_type_mapping[tuple(et)] for et in edge_types], dtype=torch.long)
+
+print(edge_type)
+print(edge_index)
+print(edge_index.shape)
+
+"""**RGCNConv (Relational Graph Convolutional Network)**
+
+RGCNConv is designed to handle graphs with multiple edge types by parameterizing transformations based on relations. This layer aggregates neighborhood information based on the edge type, making it suitable for relational data.
+"""
+
+import torch
+import torch.nn.functional as F
+from torch_geometric.nn import RGCNConv
+from torch_geometric.data import HeteroData
+
+class RGCN_HeteroGNN(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_relations):
+        super(RGCN_HeteroGNN, self).__init__()
+
+        # First RGCN layer
+        self.conv1 = RGCNConv(in_channels, hidden_channels, num_relations=num_relations)
+
+        # Second RGCN layer
+        self.conv2 = RGCNConv(hidden_channels, out_channels, num_relations=num_relations)
+
+    def forward(self, x, edge_index, edge_type):
+        # First convolutional layer with activation
+        x = self.conv1(x, edge_index, edge_type)
+        x = F.relu(x)
+        print("Output after first RGCNConv layer:", x.shape)
+
+        # Second convolutional layer
+        x = self.conv2(x, edge_index, edge_type)
+        print("Output after second RGCNConv layer:", x.shape)
+
+        return x
+
+
+# Flatten node features for RGCN input
+# Get the feature dimensions for user and product nodes
+user_feature_dim = hdata['user'].x.shape[1]
+product_feature_dim = hdata['product'].x.shape[1]
+
+# Pad the user features to match the product feature dimension if necessary
+if user_feature_dim != product_feature_dim:
+    padding_size = product_feature_dim - user_feature_dim
+    padding = torch.zeros(hdata['user'].x.shape[0], padding_size, dtype=hdata['user'].x.dtype, device=hdata['user'].x.device)
+    hdata['user'].x = torch.cat([hdata['user'].x, padding], dim=1)
+
+# Now concatenate the features
+x = torch.cat([hdata['user'].x, hdata['product'].x], dim=0)  # Combine features
+
+# Model parameters
+in_channels = x.size(1)
+hidden_channels = 32
+out_channels = 16
+num_relations = 2  # Two relations: viewed and bought
+
+edge_type = []
+for i in range(edge_index.shape[1]):  # Iterate through all edges
+    if i < hdata['user', 'buy', 'product'].edge_index.shape[1]:
+        edge_type.append(edge_type_mapping[('user', 'buy', 'product')])  # Type 0 for 'buy'
+    else:
+        edge_type.append(edge_type_mapping[('user', 'view', 'product')])  # Type 1 for 'view'
+edge_type = torch.tensor(edge_type, dtype=torch.long)
+
+# Initialize model
+model = RGCN_HeteroGNN(in_channels, hidden_channels, out_channels, num_relations)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+# Forward pass
+model.train()
+out = model(x, edge_index, edge_type)
+print("Final output:", out)
+
+print(edge_index)
+print(edge_type)
+print(out.shape)
+
+"""predictions contains the predicted class labels for each node."""
+
+predictions = out.argmax(dim=1)  # Get the class with the highest score for each node
+
+print(predictions)
+print(predictions.shape)
+
+#max value in predictions
+print(predictions.max())
+
+"""Edge Classification
+
+edge_logit is the score for each edge indicating the likelihood of the presence/type of a relation between the nodes.
+"""
+
+# Example for edge classification
+
+# Assume you have the embeddings `out` from the trained model and the list of edges for which you want predictions:
+edge_embeddings = out[edge_index[0]] * out[edge_index[1]]  # Dot product or other combination
+edge_logits = torch.sigmoid(edge_embeddings.sum(dim=1))    # Sigmoid if binary classification
+
+print(edge_logits)
+print(edge_logits.shape)
+# If using a more complex setup, you might pass `edge_embeddings` to another neural network layer
+
+"""Link Prediction
+
+Link scores contain predictions for likelihood of edges between selected pairs
+
+"""
+
+# Select pairs of nodes you want to evaluate for potential edges
+node_pairs = [(i, j) for i in range(len(out)) for j in range(i+1, len(out))]  # Example pairs
+
+print(len(node_pairs))
+print(type(node_pairs))
+
+# Compute link prediction scores
+link_scores = []
+for i, j in node_pairs:
+    score = torch.dot(out[i], out[j])  # Dot product similarity for link prediction
+    link_scores.append(score)
+
+print(link_scores)
+print(len(link_scores))
+
+import torch
+import torch.nn.functional as F
+from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv
+from torch_geometric.data import HeteroData
+
+class HeteroGNN(torch.nn.Module):
+    def __init__(self, user_in_channels, product_in_channels, hidden_channels, out_channels):
+        super(HeteroGNN, self).__init__()
+
+        # Define HeteroConv with different convolution layers for each edge type
+        # Use SAGEConv for both edge types, as it supports bipartite message passing
+        self.conv1 = HeteroConv({
+            ('user', 'buy', 'product'): SAGEConv((user_in_channels, product_in_channels), hidden_channels),  # SAGEConv used here
+            ('user', 'view', 'product'): SAGEConv((user_in_channels, product_in_channels), hidden_channels)  # SAGEConv used here
+        }, aggr='sum')
+
+        self.conv2 = HeteroConv({
+            ('user', 'buy', 'product'): SAGEConv((hidden_channels, hidden_channels), out_channels),  # SAGEConv used here
+            ('user', 'view', 'product'): SAGEConv((hidden_channels, hidden_channels), out_channels)  # SAGEConv used here
+        }, aggr='sum')
+
+
+    def forward(self, x_dict, edge_index_dict):
+        # Apply the first layer of convolutions
+        x_dict = self.conv1(x_dict, edge_index_dict)
+
+
+        # Ensure all node types have features after the first layer
+        # If a node type has no outgoing edges, its features might be None
+        # In such cases, keep the original features
+        for node_type in x_dict:
+            if x_dict[node_type] is None:
+                # Keep original features instead of None
+                x_dict[node_type] = x_dict[node_type]
+
+        x_dict = {key: F.relu(x) if x is not None else x_dict[key] for key, x in x_dict.items()}  # Handle potential None values
+        print("Output after first HeteroConv layer:", x_dict)
+
+        # Apply the second layer of convolutions
+        filtered_edge_index_dict = {}
+        for edge_type, edge_index in edge_index_dict.items():
+            src_type, _, dst_type = edge_type
+            # Convert node type names to lowercase for consistency:
+            src_type = src_type.lower()
+            dst_type = dst_type.lower()
+
+            if src_type in x_dict and dst_type in x_dict and x_dict[src_type] is not None and x_dict[dst_type] is not None:
+                filtered_edge_index_dict[edge_type] = edge_index
+
+
+        x_dict = self.conv2(x_dict, filtered_edge_index_dict)
+        print("Output after second HeteroConv layer:", x_dict)
+
+        return x_dict
+
+
+in_channels_dict = {
+    'user': hdata['user'].x.size(1),  # Replace with the actual input feature dimension for 'user'
+    'product': hdata['product'].x.size(1)  # Replace with the actual input feature dimension for 'product' , Take the first dimension of the tensor for product input channels
+}
+
+# Assuming you have your HeteroData object prepared as `hdata`
+hidden_channels = 32  # Example value for hidden channels
+out_channels = hdata['user'].y.size(1)  # For example, if doing 3-class classification
+
+user_in_channels = hdata['user'].x.size(1)
+product_in_channels = hdata['product'].x.size(1)
+
+print(f"User in_channels: {user_in_channels}")
+print(f"Product in_channels: {product_in_channels}")
+
+# Initialize the model with the correct input channels:
+model = HeteroGNN(user_in_channels, product_in_channels, hidden_channels=hidden_channels, out_channels=out_channels)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+print(model)
+print("User node feature shape:", hdata['user'].x.shape)
+print("Product node feature shape:", hdata['product'].x.shape)
+print("Edge index for 'user'-'buy'-'product':", hdata['user', 'buy', 'product'].edge_index.shape)
+print("Edge index for 'user'-'view'-'product':", hdata['user', 'view', 'product'].edge_index.shape)
+
+# Forward pass
+model.train()
+out = model(hdata.x_dict, hdata.edge_index_dict)
+print("Model output:", out)
+
+"""**Build the Heterogeneous graph data object ---**"""
 
 !pip install torch_geometric
 
