@@ -602,6 +602,17 @@ user_ids = torch.tensor(df_user_features['ip_id'].values, dtype=torch.long)
 print(user_ids)
 print(user_ids.shape)
 
+# Label encode City in df_user_features
+label_encoder = LabelEncoder()
+df_user_features['State'] = label_encoder.fit_transform(df_user_features['State'])
+print(df_user_features['State'])
+print(df_user_features['State'].shape)
+
+# convert it to a tensor
+state_tensor = torch.tensor(df_user_features['State'].values, dtype=torch.long)
+print(state_tensor)
+print(state_tensor.shape)
+
 # One-hot encode 'City'
 city_one_hot = pd.get_dummies(df_user_features['City'])
 
@@ -620,16 +631,22 @@ user_features = torch.cat([access_count_tensor, buy_count_tensor, city_tensor], 
 # Concatenate access_count, buy_count and city tensors to form user features
 user_features = torch.cat([access_count_tensor], dim=1)
 
-# One-hot encode 'State'
-state_one_hot = pd.get_dummies(df_user_features['State'])
-user_y = torch.tensor(state_one_hot.values, dtype=torch.float)
+# label encoded 'State' from above
+user_y = state_tensor
 
 print(user_features)
 print(user_features.shape)
 print(product_features)
 print(product_features.shape)
 
-print(len(df_product_1hotfeatures))
+#print(len(df_product_1hotfeatures))
+print(len(user_y))
+print(user_y.shape)
+print(user_y)
+
+print(len(product_y))
+print(product_y.shape)
+print(product_y)
 
 """Initialize the HeteroData object"""
 
@@ -803,12 +820,11 @@ print(edge_index)
 print(edge_index.shape)
 """
 
-print(edge_index)
-print(edge_index.shape)
-
 """Splitting the Heterogeneous Graph into test and train"""
 
-edge_index = torch.cat([hdata['user', 'view', 'product'].edge_index, hdata['user', 'buy', 'product'].edge_index], dim=1)
+edge_types = [('user', 'buy', 'product'), ('user', 'view', 'product')]
+
+edge_index = torch.cat([hdata['user', 'buy', 'product'].edge_index, hdata['user', 'view', 'product'].edge_index], dim=1)
 
 # Create a mapping from edge type to numerical index
 edge_type_mapping = {
@@ -820,8 +836,8 @@ edge_type_mapping = {
 edge_type = torch.tensor([edge_type_mapping[tuple(et)] for et in edge_types], dtype=torch.long)
 
 print(edge_type)
-
-edge_types = [('user', 'buy', 'product'), ('user', 'view', 'product')]
+print(edge_index)
+print(edge_index.shape)
 
 """Split the Graph Edges for link prediction"""
 
@@ -981,6 +997,9 @@ print(out.shape)
 
 """predictions contains the predicted class labels for each node."""
 
+print(type(out))
+
+assert isinstance(out, torch.Tensor), "Output should be a Tensor!"
 predictions = out.argmax(dim=1)  # Get the class with the highest score for each node
 
 print(predictions)
@@ -1024,6 +1043,8 @@ for i, j in node_pairs:
 
 print(link_scores)
 print(len(link_scores))
+
+"""Another HeteroGNN implementation, using SAGE convolution"""
 
 import torch
 import torch.nn.functional as F
@@ -1088,7 +1109,7 @@ in_channels_dict = {
 
 # Assuming you have your HeteroData object prepared as `hdata`
 hidden_channels = 32  # Example value for hidden channels
-out_channels = hdata['user'].y.size(1)  # For example, if doing 3-class classification
+out_channels = 1 # hdata['user'].y.size(1)  # For example, if doing 3-class classification
 
 user_in_channels = hdata['user'].x.size(1)
 product_in_channels = hdata['product'].x.size(1)
@@ -1146,8 +1167,18 @@ print(data)
 import matplotlib.pyplot as plt
 import networkx as nx
 from torch_geometric.utils import to_networkx
+from torch_geometric.data import Data  # Import Data
 
-graph = to_networkx(data)
+#graph = to_networkx(hdata)
+
+homogeneous_data = Data(
+    x=hdata['user'].x,  # Node features for 'node_type_1'
+    edge_index=hdata['user', 'buy', 'product'].edge_index,  # Edge index for the specified edge type
+    y=None  # Optional: add target labels if available
+)
+
+# Convert the homogeneous Data object to NetworkX:
+graph = to_networkx(homogeneous_data)
 
 # Define colors for nodes and edges
 node_type_colors = {
@@ -1157,13 +1188,15 @@ node_type_colors = {
 
 node_colors = []
 labels = {}
-for node, attrs in graph.nodes(data=True):
-    node_type = attrs["type"]
+num_users = hdata['user'].num_nodes
+for node in graph.nodes():
+    # Assuming nodes 0 to num_users - 1 are users, and the rest are products
+    node_type = "user" if node < num_users else "product"
     color = node_type_colors[node_type]
     node_colors.append(color)
-    if attrs["type"] == "user":
+    if node_type == "user":
         labels[node] = f"U{node}"
-    elif attrs["type"] == "product":
+    elif node_type == "product":
         labels[node] = f"P{node}"
 
 # Define colors for the edges
@@ -1174,16 +1207,22 @@ edge_type_colors = {
 
 edge_colors = []
 for from_node, to_node, attrs in graph.edges(data=True):
-    edge_type = attrs["type"]
+    # Get the edge type from the original HeteroData object
+    edge_type = ('user', 'buy', 'product')  # Assuming all edges in homogeneous_data are of this type
+
+    # Access the color for this type of edge:
     color = edge_type_colors[edge_type]
 
+    # Set the color as an attribute within your networkx graph
     graph.edges[from_node, to_node]["color"] = color
+
+    # Append to your list of edge colors
     edge_colors.append(color)
 
 
 # Draw the graph
 
-""" Commmented : Takes long to run
+""" Commmented : Takes long to run """
 pos = nx.spring_layout(graph, k=2)
 nx.draw_networkx(
     graph,
@@ -1195,8 +1234,6 @@ nx.draw_networkx(
     node_size=600,
 )
 plt.show()
-
-"""
 
 """**Measuring parameters in a PyTorch Geometric (PyG) HeteroData graph**"""
 
@@ -1235,23 +1272,23 @@ class HeteroGNN(nn.Module):
             x_dict = conv(x_dict, data[edge_type_tuple].edge_index)
         return x_dict
 
-#data = ...  # Your HeteroData object
-model_HGNN = HeteroGNN(data)
+
+model_HGNN_Sage = HeteroGNN(hdata)
 
 # Count parameters
 # Assuming you have a function 'count_parameters' defined
-total_params = count_parameters(model_HGNN)
+total_params = count_parameters(model_HGNN_Sage)
 print(f"Total parameters: {total_params}")
 
 
 # Iterate Over Edge Types
-for edge_type in data.edge_types:
+for edge_type in hdata.edge_types:
     # Access edge features for this type
-    edge_index = data[edge_type].edge_index
+    edge_index = hdata[edge_type].edge_index
 
     # Check if edge attributes exist before accessing them
-    if 'edge_attr' in data[edge_type]:  # Check if edge_attr is present
-        edge_features = data[edge_type].edge_attr
+    if 'edge_attr' in hdata[edge_type]:  # Check if edge_attr is present
+        edge_features = hdata[edge_type].edge_attr
         print(f"Edge features for {edge_type}: {edge_features.shape}")
     else:
         print(f"No edge features found for {edge_type}")
@@ -1302,9 +1339,7 @@ df_ac_log['date_ip'] = df_ac_log['date'].astype(str) + '_' + df_ac_log['ip'].ast
 
 """Create Edge information with timestamps. The discrete time interval is set by date"""
 
-print data
-
-# Original edge information with timestamps
+print(hdata)
 
 # Split the dataframe by date and ip address simulating temporal behaviour of the users on the website
 
@@ -1324,7 +1359,9 @@ print(len(split_dfs))
 """We have now split the dataset into user session datasets.
 
 Let's calculate the average user request duration by session, # of requests per session, entry Product, exit Product, is Exit a buy etc.
-"""
+
+Used an alternate approach to represent timestamp in the graph
+#### Commented for now: Might use later
 
 temp_dataframes = []
 
@@ -1399,7 +1436,9 @@ for i in range(len(split_dfs)):
   print(temp_data)
   print("~~~~")
 
-"""Convert the HeteroData object into NetworkX object to visualize the graphs
+"
+
+Convert the HeteroData object into NetworkX object to visualize the graphs
 
 ###### Draw the graph
   graph = to_networkx(temp_data)  # Convert to undirected graph
@@ -1489,17 +1528,14 @@ for i in range(len(split_dfs)):
   plt.show()
 """
 
-print(len(split_dfs))
-print(split_dfs[1])
-
 # Verify the HeteroData object
-print(data.metadata())
+print(hdata.metadata())
 
 #print(data['user'])
 
-data.x_dict
+hdata.x_dict
 
-x_dict = data.x_dict
+x_dict = hdata.x_dict
 print("x_dict:", {key: value.shape for key, value in x_dict.items()})
 
 """Create custom GNN layers in Pytorch Geometric"""
@@ -1540,8 +1576,6 @@ conv = GCNConv(16, 32)
 
 """Create a one-layer GAT model"""
 
-print(data['user'].x)
-
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GAT
@@ -1552,60 +1586,75 @@ model_GAT = GAT(in_channels=-1, hidden_channels=64, out_channels=4, num_layers=1
 
 optimizer = torch.optim.Adam(model_GAT.parameters(), lr=0.01, weight_decay=0.001)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-data = data.to(device)
+htdata = htdata.to(device)
 model_GAT = model_GAT.to(device)
 
-#  Convert data['user'].x to a NumPy array and then to a tensor
-data['user'].x = data['user'].x.type(torch.float).to(device)
-
 # Get the maximum node index for 'user' nodes only
-num_user_nodes = data['user'].x.shape[0]
-
-# Convert to undirected if needed
-edge_index = data['user', 'buy', 'product'].edge_index
-edge_index = to_undirected(edge_index, num_nodes=num_user_nodes)
-data['user', 'buy', 'product'].edge_index = edge_index
+num_user_nodes = htdata['user'].x.shape[0]
 
 # Initialize target labels for 'user' nodes
 # Replace with your actual target labels later if available
 target_labels = torch.zeros(num_user_nodes, dtype=torch.long).to(device)
 
+htdata['user'].y = htdata['user'].y.clamp(0, 3)
+
 # Assign target labels to the 'user' data
-if not hasattr(data['user'], 'y'):
-    data['user'].y = target_labels
+if not hasattr(htdata['user'], 'y'):
+    htdata['user'].y = target_labels
 
 # test function
 @torch.no_grad()
 def test():
-  model_GAT.eval()
-  pred = model_GAT(data['user'].x, data['user', 'buy', 'product'].edge_index).argmax(dim=1)
-  correct = (pred[data['user'].test_mask] == data['user'].y[data['user'].test_mask]).sum()
-  acc = int(correct) / int(data['user'].test_mask.sum())
-  return float(acc)
+    model_GAT.eval()
+    pred = model_GAT(htdata['user'].x, htdata['user', 'buy', 'product'].edge_index).argmax(dim=1)
+
+    # Apply the test mask to both pred and htdata['user'].y using user indices
+    user_indices = torch.arange(htdata['user'].num_nodes, device=device)  # Get indices of user nodes
+    test_user_indices = user_indices[htdata['user'].test_mask.nonzero(as_tuple=True)[0]]
+
+    # Ensure pred and target labels have the same shape for comparison
+    pred_test = pred[test_user_indices]
+    target_test = htdata['user'].y[test_user_indices]
+
+    # Check if target_test is 0-dimensional and reshape if necessary
+    if target_test.dim() == 0:
+        target_test = target_test.reshape(1)  # Reshape to 1D
+
+     # Check if pred_test and target_test have mismatched shapes
+    if pred_test.shape != target_test.shape:
+        # Print shapes for debugging
+        print(f"pred_test shape: {pred_test.shape}, target_test shape: {target_test.shape}")
+
+    # Perform element-wise comparison only if shapes match
+    if pred_test.shape == target_test.shape:
+        correct = (pred_test == target_test).sum()
+        acc = int(correct) / int(htdata['user'].test_mask.sum())
+        return float(acc)
+    else:
+        print("Shape mismatch, returning 0 accuracy.")
+        return 0.0  # Or handle the mismatch appropriately
+
 
 
 # Create training loop
-for epoch in range(10):
+for epoch in range(num_user_nodes):
     model_GAT.train()
     optimizer.zero_grad()
-    out = model_GAT(data['user'].x, data['user', 'buy', 'product'].edge_index)
+    out = model_GAT(htdata['user'].x, htdata['user', 'buy', 'product'].edge_index)
 
-    # Apply RandomNodeSplit only to 'user' nodes
-    if epoch == 0:  # Apply the split only once before training
-        # Get the number of user nodes
-        num_user_nodes = data['user'].x.shape[0]
+    # Extract output for user nodes and select training samples
+    out_user = out[:htdata['user'].x.shape[0]]
+    train_mask = htdata['user'].train_mask
 
-        # Apply the transform to the 'user' data only
-        transform = RandomNodeSplit(split='train_rest', num_val=0.2, num_test=0.2)
-        data = transform(data)  # Apply to the entire data object
-        # data['user'] = transform(data['user'])  # Apply to the 'user' data
+    target_labels = htdata['user'].y[train_mask]
+    #If target_labels is not 1D, reshape to 1D
+    if target_labels.dim() != 1:
+        target_labels = target_labels.argmax(dim=1) # Reshape to 1D if necessary
+
+    target_labels = target_labels.clamp(0, 3) # Clamp values to be between 0 and 3
 
 
-    # Access the masks from the 'user' node data
-    train_mask = data['user'].train_mask
-    target_labels = data['user'].y[train_mask]
-
-    loss = F.cross_entropy(out[train_mask], target_labels)
+    loss = F.cross_entropy(out_user[train_mask], target_labels)
     loss.backward()
     optimizer.step()
     print(f'Epoch: {epoch}, Loss: {loss.item()}, Accuracy: {test()}')
@@ -1656,8 +1705,12 @@ print("x_dict:", {key: value.shape for key, value in x_dict.items()})
 
 """Heterogeneous GNN model"""
 
-print(model_HGNN)
-print(out)
+print(model_HGNN_Sage)
+#print(out)
+
+print(model_GAT)
+
+"""HeteroGNN implementation using GCNConv"""
 
 import torch
 import torch.nn as nn
@@ -1670,7 +1723,6 @@ class HeteroGNN2(torch.nn.Module):
         super().__init__()
         # Get the input dimensions from x_dict for the 'user' node type
         user_input_dim = next(iter(x_dict.values())).shape[1]  # Assuming all nodes have the same feature dimension
-
 
         # Define the convolutional layers as separate attributes
         self.user_buy_product_conv1 = GCNConv(user_input_dim, hidden_channels, add_self_loops=False)
@@ -1691,22 +1743,30 @@ class HeteroGNN2(torch.nn.Module):
 
     def forward(self, x_dict, edge_index_dict):
         print("x_dict:", x_dict)
-        print("edge_index_dict:", edge_index_dict)
-
+        #print("edge_index_dict:", edge_index_dict)
         x_dict = self.conv1(x_dict, edge_index_dict)
-        x_dict = {key: x.relu() for key, x in x_dict.items()}
-        x_dict = self.conv2(x_dict, edge_index_dict)
 
+        # Replace the loop with a direct key access:
+        try:
+            x_dict['user'] = x_dict['user'].relu()
+        except KeyError:
+            pass  # If 'user' key is not present, do nothing
+
+        x_dict = self.conv2(x_dict, edge_index_dict)
         return x_dict
 
-    def trace(self):
+    def trace(self, x_dict, edge_index_dict): # Pass sample inputs to trace
         if not self.traced:
-            self.forward = symbolic_trace(self._forward_for_tracing, concrete_args={'self': self})
+            # Use Interpreter to execute the traced graph with sample inputs
+            # Trace the stored copy of the forward function
+            traced_graph = symbolic_trace(self._forward_for_tracing, concrete_args={'x_dict': x_dict, 'edge_index_dict': edge_index_dict})
+            # Create a callable using Interpreter and assign to self.forward
+            self.forward = lambda x_dict, edge_index_dict: Interpreter(traced_graph).run(x_dict=x_dict, edge_index_dict=edge_index_dict)
             self.traced = True
 
 # Sample input from a HeteroData object
-x_dict = data.x_dict  # Ensure this is correctly formatted
-edge_index_dict = data.edge_index_dict  # Ensure this is correctly formatted
+x_dict = hdata.x_dict  # Ensure this is correctly formatted
+edge_index_dict = hdata.edge_index_dict  # Ensure this is correctly formatted
 
 # Instantiate the model
 hidden_channels = 64  # Example value
@@ -1714,7 +1774,7 @@ out_channels = 32  # Example value
 model_HGNN = HeteroGNN2(metadata=None, hidden_channels=hidden_channels, out_channels=out_channels)
 
 # Trace the model before the forward pass
-model_HGNN.trace()
+model_HGNN.trace(x_dict, edge_index_dict)
 
 # Forward pass
 out = model_HGNN(x_dict, edge_index_dict)
