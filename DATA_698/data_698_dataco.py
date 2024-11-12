@@ -28,6 +28,8 @@ if ram_gb < 20:
 else:
   print('You are using a high-RAM runtime!')
 
+!pip install torch-geometric==2.0.4
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -36,7 +38,7 @@ import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
 
-"""Importing the dataset"""
+"""# Import the dataset"""
 
 # Access Log data
 access_log_url = 'https://raw.githubusercontent.com/baruab/baruab/refs/heads/main/DATA_698/DataCo/tokenized_access_logs.csv'
@@ -80,10 +82,8 @@ df_ac_log.isnull().sum()
 
 #df_sc.isnull().sum()
 
-"""**Feature Engineering**
-
-Add geo features to the data based on IP address information. Map the IP address with Country, State and City.
 """
+Add geo features to the data based on IP address information. Map the IP address with Country, State and City."""
 
 #!pip install ipinfo
 #import ipinfo
@@ -157,7 +157,7 @@ df_ac_log.nunique()
 df_ac_log = df_ac_log.drop_duplicates()
 df_ac_log.duplicated().sum()
 
-"""Feature Engineering
+"""# Feature Engineering
 
 Let's split the date time string into date & time represented as numbers to create indexes, if needed
 """
@@ -214,7 +214,7 @@ num_cols = df_ac_log.select_dtypes(include=np.number).columns.tolist()
 print("Numerical Variables:")
 print(num_cols)
 
-"""EDA Univariate Analysis
+"""# EDA Univariate Analysis
 
 Below are some histogram and box plots showing the pattern of variables using the Access Log information
 """
@@ -595,7 +595,7 @@ product_y = dept_labels_tensor
 print(product_y.shape)
 #data['product'].x = product_features
 
-"""**Create User Node and Features**"""
+"""# **Create User Node and Features**"""
 
 # group by ip_id and city
 #df_ac_log.groupby(["ip_id", "city"]).count()
@@ -603,10 +603,13 @@ print(product_y.shape)
 access_count = df_ac_log.groupby("ip_id")["date_id"].count().rename("access_count")
 print(access_count)
 
+access_count2 = df_ac_log.groupby("ip_id")["ip_id"].count().rename("access_count2")
+print(access_count2.sum())
+
 #Let's create the User Node, create a subset dataframe.
 # Add user city, access count and buy intent count
 
-access_count = df_ac_log.groupby("ip_id")["date_id"].count().rename("access_count")
+access_count = df_ac_log.groupby("ip_id")["ip_id"].count().rename("access_count")
 buy_count = df_ac_log[df_ac_log["AddToCart"] == 1].groupby("ip_id")["AddToCart"].count().rename("buy_count")
 user_node_features = pd.concat([access_count, buy_count], axis=1)
 
@@ -619,6 +622,7 @@ user_id_mapping = user_node_features['ip_id']
 #user_node_features = user_node_features.drop('ip_id', axis=1)
 user_node_features.head()
 
+print(access_count)
 #print(len(user_node_features))
 
 """Create a subset dataframe of ip_id and City"""
@@ -678,7 +682,18 @@ state_tensor = torch.tensor(df_user_features['State'].values, dtype=torch.float)
 print(state_tensor)
 print(state_tensor.shape)
 
-user_y = torch.cat([state_tensor], dim=1) # state_tensor
+# convert it to a tensor
+buy_count_tensor = torch.tensor(df_user_features['buy_count'].values, dtype=torch.float).view(-1,1)
+
+
+unknown_class = -1  # Define a class for unknown labels
+
+user_y = torch.cat([buy_count_tensor], dim=1)
+
+#check isnan on user_y and replace by unknown_class
+user_y[torch.isnan(user_y)] = unknown_class
+print(user_y)
+print(user_y.shape)
 
 print(user_y)
 
@@ -696,7 +711,7 @@ print(len(product_y))
 print(product_y.shape)
 #print(product_y)
 
-"""Initialize the HeteroData object"""
+"""# Initialize the HeteroData object"""
 
 !pip install torch-geometric torch-sparse torch-scatter
 # Import the necessary library
@@ -871,7 +886,9 @@ print(edge_index.shape)
 
 print(len(df_ac_log))
 
-"""Splitting the Heterogeneous Graph into test and train"""
+"""# Create the edge_types and edge_index
+Splitting the Heterogeneous Graph into test and train
+"""
 
 edge_types = [('user', 'buy', 'product'), ('user', 'view', 'product')]
 
@@ -895,13 +912,18 @@ print(edge_index.shape)
 from torch_geometric.transforms import RandomLinkSplit
 from torch_geometric.data import HeteroData
 
+"""
+edge_types = [('user', 'buy', 'product'), ('user', 'view', 'product')]
+rev_edge_types = [('product', 'rev_buy', 'user'), ('product', 'rev_view', 'user')]  # Reverse edge types
 
 # Perform a graph-aware split into train/val/test sets
 transform = RandomLinkSplit(
     is_undirected=True,
     add_negative_train_samples=True,
-    edge_types=edge_types  # Add this line to specify edge types
+    edge_types=edge_types,
+    rev_edge_types=rev_edge_types  # Added rev_edge_types
 )
+
 train_data, val_data, test_data = transform(hdata)
 
 #print number of nodes and edges in the graph
@@ -927,8 +949,11 @@ for edge_type in train_data.edge_types:
         print(f"Number of edges in test graph for {edge_type}: {test_edge_count}")
     else:
         print(f"Edge index is not available for edge type: {edge_type} in testing data")
+"""
 
 """Split the graph by node index for node classification"""
+
+print(hdata['user'])
 
 from torch_geometric.transforms import RandomNodeSplit
 from torch_geometric.data import HeteroData
@@ -947,10 +972,19 @@ print(f"Training nodes: {train_count}")
 print(f"Validation nodes: {val_count}")
 print(f"Testing nodes: {test_count}")
 
+# Access the train_mask for the specific node type (e.g., 'product')
+train_product_count = htdata['product'].train_mask.sum().item()
+val_product_count = htdata['product'].val_mask.sum().item()
+test_product_count = htdata['product'].test_mask.sum().item()
+
+print(f"Training nodes: {train_product_count}")
+print(f"Validation nodes: {val_product_count}")
+print(f"Testing nodes: {test_product_count}")
+
 print(edge_index)
 print(edge_index.shape)
 
-"""**Hurray ! We have created the Heterogeneous Graph, verified the node counts for User & Product which matches the inital dataframe unique count values**
+"""# **Hurray ! We have created the Heterogeneous Graph, verified the node counts for User & Product which matches the inital dataframe unique count values**
 
 The edge relationships are now defined, can be expanded upon later if needed
 Also we have split the Graph for testing, training and evaluation purposes
@@ -1022,6 +1056,8 @@ class RGCN_HeteroGNN(torch.nn.Module):
 
         x = self.conv1(x, edge_index_dict[('user', 'buy', 'product')], edge_type_sliced)
         x = F.relu(x)
+        print("num_edges:", num_edges)
+        print("edge_type_sliced =", edge_type_sliced)
         print("Output after first RGCNConv layer:", x.shape)
 
         # Second convolutional layer
@@ -1037,6 +1073,7 @@ class RGCN_HeteroGNN(torch.nn.Module):
 # Assuming `data` is your HeteroData object with x_dict and edge_index_dict
 in_channels = hdata['user'].x.size(-1)       # Input channels for user nodes
 
+print("in_channels count =" , in_channels)
 hidden_channels = 32
 out_channels = 32
 num_relations = 1  # Two relations: viewed and bought
@@ -1088,7 +1125,7 @@ print(edge_index_dict[('user', 'buy', 'product')])
 print(hdata['user'].y.shape)
 
 # Define the number of epochs
-num_epochs = 100
+num_epochs = 10
 
 
 
@@ -1132,6 +1169,7 @@ print(predictions.shape)
 
 #max value in predictions
 print(predictions.max())
+print(predictions.min())
 
 """Edge Classification
 
@@ -1468,41 +1506,134 @@ plt.show()
 df_ac_log['date_ip'] = df_ac_log['date'].astype(str) + '_' + df_ac_log['ip'].astype(str)
 #df_ac_log.head()
 
+df_ac_log.info()
+
+#df_ac_log.info()
+
+# create a subset dataframe with IP, ip_id, date1, Date1_ID, Session_ID, date_ip_id, date_ip, AddToCart
+df_session_log = df_ac_log[[ 'ip_id', 'Product', 'Product_Id', 'Category', 'Category_Id', 'Department', 'Department_Id', 'City','State','Country' ,'date', 'time', 'date_ip', 'AddToCart', 'Session_ID', 'date_ip_id', 'Date1_ID']]
+
+df_session_log.head()
+
+##max session_ID
+#print("User node feature shape:", hdata['user'].x.shape)
+print("session_id, max = ", df_session_log['Session_ID'].max())
+### min session_ID
+print("session_id, min = ",df_session_log['Session_ID'].min())
+
+##max ip_id
+print(df_session_log['ip_id'].max())
+### min ip_id
+print(df_session_log['ip_id'].min())
+
+##max date_ip_id
+print("date_ip_id, max = ", df_session_log['date_ip_id'].max())
+### min ip_id
+print("session_id, min = ", df_session_log['date_ip_id'].min())
+
+
+# group date into week ids in df_session_log
+df_session_log['week_id'] = df_session_log['date'].dt.isocalendar().week
+##max week_id
+print("week_id, max = ", df_session_log['week_id'].max())
+### min week_id
+print("week_id, min = ", df_session_log['week_id'].min())
+
 """Create Edge information with timestamps. The discrete time interval is set by date"""
 
-# Split the dataframe by date and ip address simulating temporal behaviour of the users on the website
+# Split the dataframe by session id, date and ip address simulating temporal behaviour of the users on the website
 
-""" DON'T DELETE will uncomment later
+""" DON'T DELETE will uncomment later  """
 def split_dataframe_by_column(df, column_name):
     dataframes = []
     for value in df[column_name].unique():
         dataframes.append(df[df[column_name] == value])
     return dataframes
 
-split_dfs = split_dataframe_by_column(df_ac_log, 'date_ip')
+split_dfs = split_dataframe_by_column(df_session_log, 'date_ip_id')
 print(len(split_dfs))
 #print(split_dfs[1].info())
 
-"""
+"""# Represent the HeteroData with session_ids, using User and Product information"""
 
-"""We have now split the dataset into user session datasets.
+print(len(df_product))
+#print(df_product)
 
-Let's calculate the average user request duration by session, # of requests per session, entry Product, exit Product, is Exit a buy etc.
+df_product_nodes = df_ac_log[['Product_Id', 'Category', 'Department']]
+df_product_nodes = df_product_nodes.drop_duplicates()
+df_product_nodes = df_product_nodes.reset_index(drop=True)
+print(len(df_product_nodes))
 
-Used an alternate approach to represent timestamp in the graph
+#one hot encoding the node feature using OneHotEncoder of Scikit-Learn
+
+from sklearn.preprocessing import OneHotEncoder
+
+
+#Extract categorical columns from the dataframe
+#Here we extract the columns with object datatype as they are the categorical columns
+categorical_columns = df_product_nodes.select_dtypes(include=['object']).columns.tolist()
+
+#Initialize OneHotEncoder
+encoder = OneHotEncoder(sparse_output=False)
+
+# Apply one-hot encoding to the categorical columns
+one_hot_encoded = encoder.fit_transform(df_product_nodes[categorical_columns])
+
+#Create a DataFrame with the one-hot encoded columns
+#We use get_feature_names_out() to get the column names for the encoded data
+one_hot_df = pd.DataFrame(one_hot_encoded, columns=encoder.get_feature_names_out(categorical_columns))
+
+# Concatenate the one-hot encoded dataframe with the original dataframe
+df_encoded = pd.concat([df_product_nodes, one_hot_df], axis=1)
+
+# Drop the original categorical columns
+df_product_features = df_encoded.drop(categorical_columns, axis=1)
+
+# Display the resulting dataframe
+print(f"Encoded data : \n{df_product_features}")
+
+df_product_features.head()
+
+# Convert to numpy
+x = df_product_features.to_numpy()
+print(x)
+print(x.shape)
+
+df_split_user_node = split_dfs[35]
+df_split_user_node_col = split_dfs[35][['ip_id']]
+
+#print(df_split_user_node)
+print(len(split_dfs))
+
+for i in range(441,444):
+#for i in   range(len(split_dfs)):
+  #split_dfs[i] = split_dfs[i].sort_values(by='time')
+  # Convert 'time' column to datetime objects
+  split_dfs[i]['time'] = pd.to_datetime(split_dfs[i]['time'])
+  print(i)
+  print(split_dfs[i]['ip_id'].unique())
+  #print(split_dfs[i]['Session_ID'])
+
+"""Create array of HeteroData objects based on Sesson_IDs"""
+
 #### Commented for now: Might use later
 
-temp_dataframes = []
+split_dataframes = []
 
 # Iterate the Split_df list
-for i in range(len(split_dfs)):
-#for i in range(1,2):
+#for i in range(len(split_dfs)):
+for i in range(1,2):
 
   split_dfs[i] = split_dfs[i].sort_values(by='time')
   # Convert 'time' column to datetime objects
   split_dfs[i]['time'] = pd.to_datetime(split_dfs[i]['time'])
   split_dfs[i]['avg_req_duration'] = (max(split_dfs[i]['time']) - min(split_dfs[i]['time'])) / len(split_dfs[i])
   split_dfs[i]['num_requests'] = len(split_dfs[i])
+  # num buys based on AddToCart
+  split_dfs[i]['num_buys'] = split_dfs[i]['AddToCart'].sum()
+  # num views is num_requests minus num_buys
+  split_dfs[i]['num_views'] = split_dfs[i]['num_requests'] - split_dfs[i]['num_buys']
+
   split_dfs[i]['exit_product_id'] = split_dfs[i]['Product_Id'].tail(1).values[0]
   split_dfs[i]['exit_buy'] = split_dfs[i]['AddToCart'].tail(1).values[0]
   split_dfs[i]['entry_product_id'] = split_dfs[i]['Product_Id'].head(1).values[0]
@@ -1513,22 +1644,26 @@ for i in range(len(split_dfs)):
   df_temp_product_nodes = split_dfs[i][['Product_Id', 'Category']]
   df_temp_product_nodes = df_temp_product_nodes.drop_duplicates()
   df_temp_product_nodes = df_temp_product_nodes.reset_index(drop=True)
-  print(df_temp_product_nodes)
+  #print("!!! df_temp_product_nodes !!!")
+  #print(df_temp_product_nodes)
 
   # Filter df_product_features by Product_Id
   df_temp_product_features = df_product_features[df_product_features['Product_Id'].isin(df_temp_product_nodes['Product_Id'])]
-  print(df_temp_product_features)
+  #print(df_temp_product_features)
 
   # Create the user node and features
-  df_temp_user_node = split_dfs[i][['ip_id']]
+  df_temp_user_node = split_dfs[i][['Session_ID']]
   df_temp_user_node = df_temp_user_node.drop_duplicates()
   df_temp_user_node = df_temp_user_node.reset_index(drop=True)
-  print("!!!!")
-  print(df_temp_user_node)
+ # print("!!!! df_temp_user_node !!!")
+ # print(df_temp_user_node)
 
 
   avg_req_duration = split_dfs[i]['avg_req_duration'].mean()
   num_requests = split_dfs[i]['num_requests'].mean()
+  num_buys = split_dfs[i]['num_buys'].mean()
+  num_views = split_dfs[i]['num_views'].mean()
+
   exit_product_id = split_dfs[i]['exit_product_id'].mean()
 
   # Convert avg_req_duration to a numeric representation before concatenation
@@ -1538,14 +1673,18 @@ for i in range(len(split_dfs)):
   df_temp_user_features = pd.DataFrame({
     'avg_req_duration': [avg_req_duration_seconds],
     'num_requests': [num_requests],
+    'num_buys': [num_buys],
+    'num_views': [num_views],
     'exit_product_id': [exit_product_id]
   })
-  print(df_temp_user_features)
+  #print("!!!! df_temp_user_features !!!")
+  #print(df_temp_user_features)
 
 
   # Edge / edge index
-  temp_edge_index = split_dfs[i][["ip_id", "Product_Id"]].values.transpose()
-  temp_edge_index = torch.tensor(temp_edge_index, dtype=torch.long)
+  temp_edge_index = split_dfs[i][["AddToCart"]].values.transpose()
+  temp_edge_index = torch.tensor(temp_edge_index, dtype=torch.float)
+  print("!!!! temp_edge_index !!!")
   print(temp_edge_index)
   print(temp_edge_index.shape)
 
@@ -1554,18 +1693,169 @@ for i in range(len(split_dfs)):
   temp_data = HeteroData()
 
   # Set the number of nodes for 'user' and 'product'
+  temp_data.date_id = split_dfs[i]['Date1_ID'].unique() # df_temp_user_node['ip_id']
   temp_data['user'].num_nodes = len(df_temp_user_features) # Assuming user_node_features is a list or array of user features
-  temp_data['user'].id = df_temp_user_node['ip_id']
-  temp_data['product'].num_nodes = len(df_temp_product_features) # Assuming df_product_features is a DataFrame or array of product features
-
+  temp_data['user'].id = split_dfs[i]['ip_id'].unique() # df_temp_user_node['ip_id']
+  temp_data['user'].session_id = split_dfs[i]['Session_ID'].unique() # df_temp_user_node['ip_id']
   temp_data['user'].x = df_temp_user_features
-  temp_data['product'].x = df_temp_product_features
-  temp_data['user', 'view', 'product'].edge_index = temp_edge_index
 
+
+  temp_data['product'].x = df_temp_product_features
+  temp_data['product'].id = split_dfs[i]['Product_Id'].unique()
+  temp_data['product'].num_nodes = len(df_temp_product_features) # Assuming df_product_features is a DataFrame or array of product features
+  temp_data['user', 'buy', 'product'].edge_index = temp_edge_index
+
+  split_dataframes.append(temp_data)
+  print("~~~ tempdata ~~~")
   print(temp_data)
   print("~~~~")
 
-"
+"""# Sequence of Graph Snapshots
+ behavior changes over time and capture long-term temporal patterns
+"""
+
+!pip install torch-geometric-temporal
+
+"""# TGN model implementation using Temporal data structure"""
+
+#!pip install --upgrade torch-geometric torch-sparse torch-scatter
+
+!pip install torch-geometric-temporal
+
+import torch
+
+def format_pytorch_version(version):
+  return version.split('+')[0]
+
+TORCH_version = torch.__version__
+TORCH = format_pytorch_version(TORCH_version)
+
+def format_cuda_version(version):
+  return 'cu' + version.replace('.', '')
+
+CUDA_version = torch.version.cuda
+CUDA = format_cuda_version(CUDA_version)
+
+!pip install torch-scatter     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-sparse      -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+#!pip install torch-cluster     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+#!pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-geometric-temporal -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-geometric
+
+import torch
+import torch.nn.functional as F
+
+"""
+# Correct import statement
+from torch_geometric_temporal.signal import temporal_signal_split
+from torch_geometric_temporal.nn.tgn import TGNMemory, TGN
+from torch_geometric.nn import TransformerConv
+
+# Define a custom module with the out_channels attribute
+class MessageModule(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(MessageModule, self).__init__()
+        self.out_channels = out_channels  # Define the out_channels attribute
+        self.sequential = torch.nn.Sequential(
+            torch.nn.Linear(in_channels, out_channels),
+            # ... other layers in your message function
+        )
+
+    def forward(self, x):
+        return self.sequential(x)
+
+class TGNModel(torch.nn.Module):
+    def __init__(self, num_nodes, embedding_dim, memory_dim, num_layers, out_channels):
+        super(TGNModel, self).__init__()
+
+        # Initialize memory for each node
+        # Providing values for raw_msg_dim, time_dim, message_module, and aggregator_module.
+        # Please replace these with appropriate values based on your data and model requirements.
+        self.memory = TGNMemory(
+            num_nodes=num_nodes,
+            memory_dim=memory_dim,
+            raw_msg_dim=embedding_dim,  # Example: Assuming raw message dimension is the same as embedding dimension
+            time_dim=1,  # Example: Assuming time is represented as a single scalar value
+            message_module=MessageModule(embedding_dim, embedding_dim),  # Pass embedding_dim as in_channels and out_channels
+            aggregator_module=lambda x: torch.mean(x, dim=0)
+        )
+
+        # Instead of trying to access and modify the internal message_module's out_channels,
+        # store your message module as an attribute of the TGNModel class
+        self.message_module = MessageModule(embedding_dim, embedding_dim)
+
+        # Transformer-based message-passing layer
+        self.message_passing = TransformerConv(
+            in_channels=memory_dim,
+            out_channels=embedding_dim,
+            heads=4
+        )
+
+        # TGN layer
+        # Assuming 'TGN' refers to a custom or third-party implementation, replace if needed.
+        # Replace with appropriate TGN implementation if necessary.
+        # Assuming this custom TGN layer can handle the memory, message passing, and number of layers.
+        self.tgn = TGN(
+            self.memory,
+            self.message_passing,
+            num_layers=num_layers
+        )
+
+        # Fully connected output layer
+        self.fc = torch.nn.Linear(embedding_dim, out_channels)
+
+    def forward(self, snapshots):
+        # Process each graph snapshot in sequence
+        out = []
+        for i, snapshot in enumerate(snapshots):
+            # Run the TGN model on each snapshot
+            node_embeddings = self.tgn(snapshot.x, snapshot.edge_index, snapshot.edge_attr, snapshot.time)
+            out.append(self.fc(node_embeddings))
+
+        return out  # List of outputs for each snapshot
+
+"""
+
+""" Train and Evaluate the Model"""
+
+# Initialize model, optimizer, and loss function
+model = TGNModel(num_nodes, embedding_dim=32, memory_dim=64, num_layers=2, out_channels=16)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+loss_fn = torch.nn.BCEWithLogitsLoss()
+#criterion = torch.nn.MSELoss()
+num_epochs = 100
+
+# Training loop
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+
+    for session in split_dataframes:
+      optimizer.zero_grad()
+
+      # Forward pass
+      out = model(session)
+
+      # Assume buy action
+      labels = torch.randint(0, 2, (session['user'].x.size(0), 1)).float()
+
+      # Compute loss
+      loss = loss_fn(out, labels)
+      loss.backward()
+      optimizer.step()
+
+      total_loss += loss.item()
+
+    #Print loss
+    print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(split_dataframes)}")
+
+#Print
+print("Training complete!")
+
+print(split_dfs[1])
+
+"""We have the dataset into user session datasets.
 
 Convert the HeteroData object into NetworkX object to visualize the graphs
 
@@ -1662,12 +1952,12 @@ print(hdata.metadata())
 
 #print(data['user'])
 
-hdata.x_dict
+#hdata.x_dict
 
 x_dict = hdata.x_dict
 print("x_dict:", {key: value.shape for key, value in x_dict.items()})
 
-"""Create a sample GCN layers in Pytorch Geometric"""
+"""# Create a sample GCN layers in Pytorch Geometric"""
 
 import torch
 import torch.nn as nn
@@ -1706,7 +1996,13 @@ conv = GCNConv(16, 32)
 print(conv)
 print(conv.aggr)
 
-"""Create a one-layer GAT model using hdata"""
+"""# Create a one-layer GAT model using hdata
+
+"""
+
+!pip install class_resolver
+
+print(htdata)
 
 import torch
 import torch.nn.functional as F
@@ -1746,6 +2042,7 @@ def test():
 
     # Ensure pred and target labels have the same shape for comparison
     pred_test = pred[test_user_indices]
+    pred_test = pred_test.reshape(-1, 1)
     target_test = htdata['user'].y[test_user_indices]
 
     # Check if target_test is 0-dimensional and reshape if necessary
@@ -1759,17 +2056,20 @@ def test():
 
     # Perform element-wise comparison only if shapes match
     if pred_test.shape == target_test.shape:
+        print("pred_test, target_test: " , pred_test, target_test)
+
         correct = (pred_test == target_test).sum()
         acc = int(correct) / int(htdata['user'].test_mask.sum())
         return float(acc)
     else:
+        #print("pred_test.shape, target_test.shape : ", pred_test.shape, target_test.shape)
         print("Shape mismatch, returning 0 accuracy.")
         return 0.0  # Or handle the mismatch appropriately
 
 
 
 # Create training loop
-for epoch in range(num_user_nodes - 3300):
+for epoch in range(num_user_nodes - 3335):
     model_GAT.train()
     optimizer.zero_grad()
     out = model_GAT(htdata['user'].x, htdata['user', 'buy', 'product'].edge_index)
@@ -1801,8 +2101,13 @@ print(hdata.metadata())
 
 """Heterogeneous Graph Transformer (HGT) Implementation"""
 
+!pip install --upgrade torch-geometric
+
 import torch
 from torch_geometric.utils import remove_self_loops
+from torch_geometric.nn import HGTConv, Linear  # Import necessary modules
+#from torch_geometric.nn import SAGEConv, to_hetero # Import for SAGEConv
+#from torch_geometric.nn import HGTModel  # Import HGTModel
 
 # Get the edge types from the edge_index_dict
 edge_types = list(hdata.edge_index_dict.keys())
@@ -1824,35 +2129,69 @@ if 'user' not in hdata.x_dict:
     print("Warning: 'user' features were missing and have been added.")
 
 
-# Re-initialize the model after updating edge_index_dict
-model = HGTModel(
-    in_channels_dict={key: hdata.x_dict[key].shape[1] for key in hdata.x_dict}, # Infer input channels from x_dict
-    hidden_channels=64,
-    out_channels=32,
-    num_heads=8,
-    num_layers=3
-)
+# Define the model using HeteroGNN and HGTConv instead of HGTModel
+class HGT(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, metadata):
+        super().__init__()
+        self.conv1 = HGTConv(hidden_channels, hidden_channels, metadata, heads=8)
+        self.conv2 = HGTConv(hidden_channels, out_channels, metadata, heads=8)
+
+    def forward(self, x_dict, edge_index_dict):
+        # x_dict, edge_index_dict = data.x_dict, data.edge_index_dict
+
+        # 1. Obtain node embeddings
+        x_dict = self.conv1(x_dict, edge_index_dict)
+
+        # 2. Transform node embeddings using Linear layers
+        x_dict = {key: Linear(x_dict[key].shape[1], 64)(x_dict[key]) for key in x_dict}  # Apply Linear to each node type
+
+        # 3. Obtain node embeddings
+        x_dict = self.conv2(x_dict, edge_index_dict)
+
+        # 4. Print shapes for debugging
+        #print("Shape of x_dict['user'] after conv2:", x_dict['user'].shape)
+
+        # Return the final node embeddings
+        return x_dict
+
+# Create the model instance
+metadata = hdata.metadata()
+model = HGT(hidden_channels=64, out_channels=32, metadata=metadata)
 
 # Forward pass through the model
 output = model(hdata.x_dict, hdata.edge_index_dict)
 
-print("Output shape:", output.shape)
+print("Output shape:", output['user'].shape)
 
+!pip install --upgrade torch-geometric
+
+import torch
 import torch.nn as nn
-from torch_geometric.nn import HGTConv
+from torch_geometric.utils import remove_self_loops
+from torch_geometric.nn import HGTConv, Linear
+
+# Ensure 'user' is present in x_dict
+if 'user' not in hdata.x_dict:
+    # Assuming you have some user features in a variable 'user_features'
+    # Make sure user_features is a PyTorch tensor of the correct shape
+    hdata.x_dict['user'] = user_features
+    print("Warning: 'user' features were missing and have been added.")
+
+# Ensure metadata is defined correctly and passed to HGTConv
+metadata = hdata.metadata()
+print("Metadata:", metadata) # Print metadata to check before HGTConv is called
 
 class HGTModel(nn.Module):
-    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_heads, num_layers):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_heads, num_layers, metadata):
         super(HGTModel, self).__init__()
         self.convs = nn.ModuleList()
 
         # Add HGT layers
-        # Using in_channels_dict for the first layer
         self.convs.append(HGTConv(
             in_channels=in_channels_dict,
             out_channels=hidden_channels,
             heads=num_heads,
-            metadata=hdata.metadata()
+            metadata=metadata # Passing metadata for the first layer
         ))
 
         # Subsequent layers use hidden_channels
@@ -1861,7 +2200,7 @@ class HGTModel(nn.Module):
                 in_channels=hidden_channels,
                 out_channels=hidden_channels,
                 heads=num_heads,
-                metadata=hdata.metadata()
+                metadata=metadata # Passing metadata for subsequent layers
             ))
 
         # Fully connected output layer
@@ -1872,17 +2211,18 @@ class HGTModel(nn.Module):
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
 
-        # Output layer for user nodes (or product nodes, if applicable)
+        # Output layer for user nodes
         return self.fc(x_dict['user'])
 
-
 # Initialize the model
+# Pass metadata to HGTModel during initialization
 model = HGTModel(
     in_channels_dict=in_channels_dict,
     hidden_channels=64,
     out_channels=32,
     num_heads=8,
-    num_layers=3
+    num_layers=3,
+    metadata=metadata
 )
 
 # Forward pass through the model
