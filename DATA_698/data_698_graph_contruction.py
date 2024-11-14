@@ -318,6 +318,8 @@ print(hdata)
 print(buy_edge_index)
 print(buy_edge_index.shape)
 
+"""# GNN model with 2 layers of SAGEConv using to_hetero function"""
+
 import torch_geometric.transforms as T
 from torch_geometric.nn import SAGEConv, to_hetero
 
@@ -362,15 +364,390 @@ print("Product node embeddings:", out[('product')])
 
 #print("User node embeddings:" , out[0])
 
+"""Move the model to appropriate device"""
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = model.to(device)
+hdata = hdata.to(device)
+
+"""Calculate the edge embedding"""
+
+import torch
+
+# Suppose `out` contains node embeddings after the forward pass
+# out['user'] and out['product'] have the embeddings for 'user' and 'product' nodes
+
+# Get edge index for the edge type you are interested in
+edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+
+# Move edge_index to the same device as out['user'] (likely CPU)
+edge_index = edge_index.to(out['user'].device)
+
+# Get the source (user) and target (product) node embeddings for each edge
+user_embeddings = out['user'][edge_index[0]]  # Source node embeddings (user)
+product_embeddings = out['product'][edge_index[1]]  # Target node embeddings (product)
+
+# Define edge embeddings, here using concatenation as an example
+edge_embeddings = torch.cat([user_embeddings, product_embeddings], dim=1)
+
+# Now `edge_embeddings` contains an embedding for each ("user", "buy", "product") edge
+print("Edge embeddings shape:", edge_embeddings.shape)
+
+"""Define Training and Evaluation Functions"""
+
 # Add training loop
 def train():
     model.train()
     optimizer.zero_grad()
     out = model(hdata.x_dict, hdata.edge_index_dict)
 
-# Select the target labels and nodes
+    # classifying 'buy' edges
+    # Extract 'user' -> 'buy' -> 'product' predictions
+    # Ensure edge_index is on the same device as the model
+    edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+    # Get the source (user) and target (product) node embeddings for each edge
+    user_embeddings = out['user'][edge_index[0]]  # Source node embeddings (user)
+    product_embeddings = out['product'][edge_index[1]]  # Target node embeddings (product)
+
+    # Define edge embeddings, here using concatenation as an example
+    buy_out = torch.cat([user_embeddings, product_embeddings], dim=1)
+
+    buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
+
+    # Move buy_labels to the same device as buy_out
+    buy_labels = buy_labels.to(device)
+    loss = criterion(buy_out, buy_labels)
+    loss.backward()
+    optimizer.step()
+    return loss.item()
+
+def evaluate():
+    model.eval()
+    with torch.no_grad():
+        out = model(hdata.x_dict, hdata.edge_index_dict)
+        # Ensure edge_index is on the same device as the model
+        edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+        # Get the source (user) and target (product) node embeddings for each edge
+        user_embeddings = out['user'][edge_index[0]]  # Source node embeddings (user)
+        product_embeddings = out['product'][edge_index[1]]  # Target node embeddings (product)
+
+        # Define edge embeddings, here using concatenation as an example
+        buy_out = torch.cat([user_embeddings, product_embeddings], dim=1)
+
+        buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
+
+        # Move buy_labels to the same device as buy_out
+        buy_labels = buy_labels.to(device)
 
 
+        # Compute accuracy
+        pred = buy_out.argmax(dim=1)
+        correct = (pred == buy_labels).sum().item()
+        acc = correct / buy_labels.size(0)
+        return acc
+
+# Training loop
+num_epochs = 50
+for epoch in range(1, num_epochs + 1):
+    loss = train()
+    if epoch % 5 == 0 or epoch == 1:
+        acc = evaluate()
+        print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Accuracy: {acc:.4f}')
+
+"""# Create Train/Validation/Test Splits"""
+
+from sklearn.model_selection import train_test_split
+
+# Split edge indices and labels
+edge_indices = hdata['user', 'buy', 'product'].edge_index
+labels = hdata['user', 'buy', 'product'].edge_label
+
+# Split indices
+train_idx, test_idx = train_test_split(range(edge_indices.size(1)), test_size=0.2, random_state=42)
+train_idx, val_idx = train_test_split(train_idx, test_size=0.25, random_state=42)  # 0.25 x 0.8 = 0.2
+
+# Create masks
+train_mask = torch.zeros(edge_indices.size(1), dtype=torch.bool)
+val_mask = torch.zeros(edge_indices.size(1), dtype=torch.bool)
+test_mask = torch.zeros(edge_indices.size(1), dtype=torch.bool)
+
+train_mask[train_idx] = True
+val_mask[val_idx] = True
+test_mask[test_idx] = True
+
+# Assign masks and split labels
+hdata['user', 'buy', 'product'].train_mask = train_mask
+hdata['user', 'buy', 'product'].val_mask = val_mask
+hdata['user', 'buy', 'product'].test_mask = test_mask
+
+"""Modify the training using the masks"""
+
+def train():
+    model.train()
+    optimizer.zero_grad()
+    out = model(hdata.x_dict, hdata.edge_index_dict)
+
+    # classifying 'buy' edges
+    # Extract 'user' -> 'buy' -> 'product' predictions
+    # Ensure edge_index is on the same device as the model
+    edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+    # Get the source (user) and target (product) node embeddings for each edge
+    user_embeddings = out['user'][edge_index[0]]  # Source node embeddings (user)
+    product_embeddings = out['product'][edge_index[1]]  # Target node embeddings (product)
+
+    # Define edge embeddings, here using concatenation as an example
+    buy_out = torch.cat([user_embeddings, product_embeddings], dim=1)
+
+    buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
+    # Move buy_labels to the same device as buy_out
+    buy_labels = buy_labels.to(device)
 
 
-# loop thru 100 epoch
+    # Use train_mask
+    train_mask = hdata['user', 'buy', 'product'].train_mask
+    loss = criterion(buy_out[train_mask], buy_labels[train_mask])
+    loss.backward()
+    optimizer.step()
+    return loss.item()
+
+def evaluate(mask):
+    model.eval()
+    with torch.no_grad():
+        out = model(hdata.x_dict, hdata.edge_index_dict)
+
+        # classifying 'buy' edges
+        # Extract 'user' -> 'buy' -> 'product' predictions
+        # Ensure edge_index is on the same device as the model
+        edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+        # Get the source (user) and target (product) node embeddings for each edge
+        user_embeddings = out['user'][edge_index[0]]  # Source node embeddings (user)
+        product_embeddings = out['product'][edge_index[1]]  # Target node embeddings (product)
+
+        # Define edge embeddings, here using concatenation as an example
+        buy_out = torch.cat([user_embeddings, product_embeddings], dim=1)
+
+        buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
+        # Move buy_labels to the same device as buy_out
+        buy_labels = buy_labels.to(device)
+
+        masked_out = buy_out[mask]
+        masked_labels = buy_labels[mask]
+
+        pred = masked_out.argmax(dim=1)
+        correct = (pred == masked_labels).sum().item()
+        acc = correct / masked_labels.size(0)
+        return acc
+
+# Training loop with validation
+num_epochs = 50
+for epoch in range(1, num_epochs + 1):
+    loss = train()
+    if epoch % 5 == 0 or epoch == 1:
+        val_acc = evaluate(hdata['user', 'buy', 'product'].val_mask)
+        print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Val Accuracy: {val_acc:.4f}')
+
+"""Implementation of GAT Layer with PyTorch"""
+
+import torch
+import torch.nn as nn
+from torch_geometric.nn import GATConv
+
+class GATModel(nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_heads):
+        super(GATModel, self).__init__()
+        # Define GAT layers
+        self.conv1 = GATConv(in_channels, hidden_channels, heads=num_heads, concat=True)
+        self.conv2 = GATConv(hidden_channels * num_heads, out_channels, heads=1, concat=False)
+
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index).relu()
+        x = self.conv2(x, edge_index)
+        return x
+
+# model initialization
+num_input_features = hdata.num_features['user']
+#print(num_input_features)
+
+in_channels =   num_input_features  # Number of input features
+hidden_channels = 32
+out_channels = 2  # Number of classes for classification
+# number of heads
+num_heads = 4
+
+model = GATModel(in_channels, hidden_channels, out_channels, num_heads)
+
+"""Implementation of HGT Layer with PyTorch"""
+
+# tensor dims seperate
+
+print(hdata['user'].x.size(dim=1))
+print(hdata['product'].x.size(dim=1))
+
+import torch
+import torch.nn as nn
+from torch_geometric.nn import HGTConv
+
+class HGTModel(nn.Module):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_heads, num_layers, metadata):
+        super(HGTModel, self).__init__()
+        self.convs = nn.ModuleList()
+
+        # Define multiple HGT layers
+        for _ in range(num_layers):
+            self.convs.append(HGTConv(
+                hidden_channels, hidden_channels,
+                metadata=metadata,
+                heads=num_heads
+            ))
+
+        # Fully connected output layer
+        self.fc = nn.Linear(hidden_channels, out_channels)
+
+    def forward(self, x_dict, edge_index_dict):
+        # Forward pass through each HGT layer
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+
+        # Output layer for user nodes (or product nodes, if applicable)
+        return self.fc(x_dict['user'])
+
+# Example model initialization
+
+num_user_features = hdata['user'].x.size(dim=1)
+num_product_features =hdata['product'].x.size(dim=1)
+
+in_channels_dict = {'user': num_user_features, 'product': num_product_features}  # Input feature sizes per node type
+hidden_channels = 32
+out_channels = 2
+num_heads = 4
+num_layers = 2
+metadata = hdata.metadata()  # Metadata from your HeteroData object
+
+model = HGTModel(in_channels_dict, hidden_channels, out_channels, num_heads, num_layers, metadata)
+
+"""Implement HAN layer"""
+
+import torch
+import torch.nn as nn
+from torch_geometric.nn import HANConv
+
+class HANModel(nn.Module):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, metadata, num_heads=8):
+        super(HANModel, self).__init__()
+        # HAN layer with meta-paths
+        self.han_conv = HANConv(
+            in_channels_dict, hidden_channels, heads=num_heads,
+            metadata=metadata, dropout=0.5
+        )
+        # Output layer
+        self.fc = nn.Linear(hidden_channels, out_channels)
+
+    def forward(self, x_dict, edge_index_dict):
+        # Pass through HAN layer
+        x_dict = self.han_conv(x_dict, edge_index_dict)
+        x = x_dict['user']  # Focusing on user nodes if predicting user-related labels
+        return self.fc(x)
+
+# model initialization
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')  # Use GPU if available
+
+# Reduce hidden_channels and num_heads to reduce model size
+hidden_channels = 16
+num_heads = 4
+
+model = HANModel(in_channels_dict, hidden_channels, out_channels, metadata, num_heads).to(device) # Move model to device
+
+# Initialize optimizer
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+criterion = nn.CrossEntropyLoss()  # For classification tasks
+
+num_epochs = 5
+# Training loop
+for epoch in range(num_epochs):
+    model.train()
+    optimizer.zero_grad()
+
+    # Move data to the same device as the model
+    out = model(hdata.x_dict, hdata.edge_index_dict)  # Forward pass
+
+    #print(f"hdata['user'].y.view(-1) size : {hdata['user'].y.view(-1).size(dim=0)}")
+    target = hdata['user'].y.view(-1)
+    # target = target - target.min() # Shift labels to start from 0 if needed
+    # *** This is useful is your labels are in the range of [min_val, max_val],
+    # *** where min_val is not 0, but you have out_channels total number of classes.
+    target = torch.clamp(target, 0, out_channels - 1) # Clamp to the expected range
+    target = target.type(torch.LongTensor).to(device)
+
+    # **Check unique values in target and compare to num_classes:**
+    unique_targets = torch.unique(target)
+
+    loss = criterion(out, target)  # Assuming labels are for 'user' nodes
+    loss.backward()
+    optimizer.step()
+
+    print(f'out (embedding)  , {out[edge_index[0]]}')
+    print(f'Epoch {epoch}, Loss: {loss.item()}')
+
+def train():
+    model.train()
+    optimizer.zero_grad()
+    out = model(hdata.x_dict, hdata.edge_index_dict)
+
+    # classifying 'buy' edges
+    # Extract 'user' -> 'buy' -> 'product' predictions
+    # Ensure edge_index is on the same device as the model
+    edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+    # Define edge embeddings, here using concatenation as an example
+    buy_out = out[edge_index[0]]
+
+    buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
+    # Move buy_labels to the same device as buy_out
+    buy_labels = buy_labels.to(device)
+
+
+    # Use train_mask
+    train_mask = hdata['user', 'buy', 'product'].train_mask
+    loss = criterion(buy_out[train_mask], buy_labels[train_mask])
+    loss.backward()
+    optimizer.step()
+    return loss.item()
+
+def evaluate(mask):
+    model.eval()
+    with torch.no_grad():
+        out = model(hdata.x_dict, hdata.edge_index_dict)
+
+        # classifying 'buy' edges
+        # Extract 'user' -> 'buy' -> 'product' predictions
+        # Ensure edge_index is on the same device as the model
+        edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
+
+
+        # Define edge embeddings, here using concatenation as an example
+        buy_out = out[edge_index[0]]
+
+        buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
+        # Move buy_labels to the same device as buy_out
+        buy_labels = buy_labels.to(device)
+
+        masked_out = buy_out[mask]
+        masked_labels = buy_labels[mask]
+
+        pred = masked_out.argmax(dim=1)
+        correct = (pred == masked_labels).sum().item()
+        acc = correct / masked_labels.size(0)
+        return acc
+
+# Training loop with validation
+num_epochs = 50
+for epoch in range(1, num_epochs + 1):
+    loss = train()
+    if epoch % 5 == 0 or epoch == 1:
+        val_acc = evaluate(hdata['user', 'buy', 'product'].val_mask)
+        print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Val Accuracy: {val_acc:.4f}')
