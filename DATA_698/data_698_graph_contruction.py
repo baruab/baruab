@@ -115,10 +115,30 @@ print(access_count)
 
 """Create Encoders"""
 
-!pip install sentence-transformers
+import torch
+
+def format_pytorch_version(version):
+  return version.split('+')[0]
+
+TORCH_version = torch.__version__
+TORCH = format_pytorch_version(TORCH_version)
+
+def format_cuda_version(version):
+  return 'cu' + version.replace('.', '')
+
+CUDA_version = torch.version.cuda
+CUDA = format_cuda_version(CUDA_version)
 
 #install torch
-!pip install torch
+!pip install torch -f https://download.pytorch.org/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-sparse      -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-scatter     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+
+!pip install torch-cluster     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-geometric -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+
+!pip install sentence-transformers
 
 import torch
 from sentence_transformers import SentenceTransformer
@@ -256,7 +276,7 @@ product_y = dept_labels_tensor
 #print(product_y)
 print(product_y.shape)
 
-!pip install torch-geometric torch-sparse torch-scatter
+##
 
 # Import the necessary library
 from torch_geometric.data import HeteroData
@@ -299,7 +319,7 @@ buy_timestamp = torch.tensor(buy_timestamp, dtype=torch.long).view(-1, 1)
 hdata['user', 'buy', 'product'].edge_index = buy_edge_index
 ### add edge_type attribute
 hdata['user', 'buy', 'product'].edge_type = 'buy'
-hdata['user', 'buy', 'product'].edge_attr = buy_timestamp
+hdata['user', 'buy', 'product'].edge_time = buy_timestamp
 
 # torch AddToCart from df_ac_log
 add_to_cart_labels = torch.tensor(df_ac_log['AddToCart'].values, dtype=torch.long)
@@ -364,7 +384,78 @@ print("Product node embeddings:", out[('product')])
 
 #print("User node embeddings:" , out[0])
 
-"""Move the model to appropriate device"""
+"""Move the model to appropriate device
+
+Visualize the graph
+"""
+
+!pip install --upgrade torch-geometric torch-sparse torch-scatter
+
+!pip install --upgrade torch-geometric
+
+import networkx as nx
+import matplotlib.pyplot as plt
+# import networkx
+from torch_geometric.utils import to_networkx
+
+
+def visualize(hdata, out, edge_type=('user', 'buy', 'product')):
+    """
+    Visualizes the graph using NetworkX with node colors based on `hdata['user'].y`.
+
+    Args:
+        hdata (HeteroData): The PyTorch Geometric HeteroData object.
+        out (Tensor): Model output tensor (e.g., predictions or embeddings).
+        edge_type (tuple): The edge type to visualize.
+    """
+    # Convert to homogeneous graph before converting to NetworkX
+    homogeneous_data = hdata.to_homogeneous()
+
+    # Convert to NetworkX graph for visualization
+    graph = to_networkx(homogeneous_data, node_attrs=['x'], edge_attrs=None, to_undirected=True)
+
+    # Extract node attributes and user labels
+    # Create a color map for all nodes in the homogeneous graph
+    node_colors = np.zeros(len(graph.nodes()))  # Initialize with zeros (default color)
+
+    # Get user node indices in the homogeneous graph
+    user_node_indices = [
+        i for i, node_type in enumerate(homogeneous_data.node_type) if node_type == hdata.node_types.index('user')
+    ]
+
+    # Assign colors to user nodes based on labels
+    user_labels = hdata['user'].y.cpu().numpy()
+
+    # Reshape user_labels to 1D before assigning to node_colors
+    node_colors[user_node_indices] = user_labels.flatten() # Reshape to (3340,)
+
+
+    # Get positions for nodes using NetworkX's layout function
+    pos = nx.spring_layout(graph, seed=42)  # Fixed seed for consistent layout
+
+    # Visualize the graph
+    plt.figure(figsize=(10, 7))
+
+    # Draw nodes with colors corresponding to labels
+    nx.draw_networkx_nodes(
+        graph,
+        pos,
+        node_color=node_colors.flatten(),
+        cmap=plt.cm.RdYlBu,  # Color map
+        node_size=300
+    )
+
+    # Draw edges
+    nx.draw_networkx_edges(graph, pos, alpha=0.5)
+
+    # Draw node labels (optional)
+    nx.draw_networkx_labels(graph, pos, font_size=10, font_color="black")
+
+    plt.title("Graph Visualization with Node Colors Based on Labels")
+    plt.axis("off")
+    plt.show()
+
+visualize(hdata, out, edge_type=('user', 'buy', 'product'))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device)
@@ -666,7 +757,7 @@ model = HANModel(in_channels_dict, hidden_channels, out_channels, metadata, num_
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 criterion = nn.CrossEntropyLoss()  # For classification tasks
 
-num_epochs = 5
+num_epochs = 50
 # Training loop
 for epoch in range(num_epochs):
     model.train()
@@ -690,30 +781,26 @@ for epoch in range(num_epochs):
     loss.backward()
     optimizer.step()
 
-    print(f'out (embedding)  , {out[edge_index[0]]}')
+ #   print(f'out (embedding)  , {out[edge_index[0]]}')
     print(f'Epoch {epoch}, Loss: {loss.item()}')
+
+"""Evaluate HAN model"""
 
 def train():
     model.train()
     optimizer.zero_grad()
     out = model(hdata.x_dict, hdata.edge_index_dict)
 
-    # classifying 'buy' edges
-    # Extract 'user' -> 'buy' -> 'product' predictions
-    # Ensure edge_index is on the same device as the model
-    edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
 
-    # Define edge embeddings, here using concatenation as an example
-    buy_out = out[edge_index[0]]
+    target = hdata['user'].y.view(-1)
+    # target = target - target.min() # Shift labels to start from 0 if needed
+    # *** This is useful is your labels are in the range of [min_val, max_val],
+    # *** where min_val is not 0, but you have out_channels total number of classes.
+    target = torch.clamp(target, 0, out_channels - 1) # Clamp to the expected range
+    target = target.type(torch.LongTensor).to(device)
 
-    buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
-    # Move buy_labels to the same device as buy_out
-    buy_labels = buy_labels.to(device)
+    loss = criterion(out, target)
 
-
-    # Use train_mask
-    train_mask = hdata['user', 'buy', 'product'].train_mask
-    loss = criterion(buy_out[train_mask], buy_labels[train_mask])
     loss.backward()
     optimizer.step()
     return loss.item()
@@ -728,18 +815,21 @@ def evaluate(mask):
         # Ensure edge_index is on the same device as the model
         edge_index = hdata.edge_index_dict[("user", "buy", "product")].to(device)
 
-
-        # Define edge embeddings, here using concatenation as an example
-        buy_out = out[edge_index[0]]
+        target = hdata['user'].y.view(-1)
+        # target = target - target.min() # Shift labels to start from 0 if needed
+        # *** This is useful is your labels are in the range of [min_val, max_val],
+        # *** where min_val is not 0, but you have out_channels total number of classes.
+        target = torch.clamp(target, 0, out_channels - 1) # Clamp to the expected range
+        target = target.type(torch.LongTensor).to(device)
 
         buy_labels = hdata['user', 'buy', 'product'].edge_label  # Shape: [num_buys]
         # Move buy_labels to the same device as buy_out
         buy_labels = buy_labels.to(device)
 
-        masked_out = buy_out[mask]
-        masked_labels = buy_labels[mask]
+      #  masked_out = target[mask]
+        masked_labels = buy_labels
 
-        pred = masked_out.argmax(dim=1)
+        pred = target.argmax(dim=0)
         correct = (pred == masked_labels).sum().item()
         acc = correct / masked_labels.size(0)
         return acc
@@ -751,3 +841,25 @@ for epoch in range(1, num_epochs + 1):
     if epoch % 5 == 0 or epoch == 1:
         val_acc = evaluate(hdata['user', 'buy', 'product'].val_mask)
         print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Val Accuracy: {val_acc:.4f}')
+
+!pip install matplotlib  # Install matplotlib if not already installed
+!pip install networkx   # Install networkx for graph visualization if not already installed
+import matplotlib.pyplot as plt
+import networkx as nx
+from sklearn.manifold import TSNE
+
+def visualize(h, color):
+    z = TSNE(n_components=2).fit_transform(h.detach().cpu().numpy())
+
+    plt.figure(figsize=(10,10))
+    plt.xticks([])
+    plt.yticks([])
+
+    plt.scatter(z[:, 0], z[:, 1], s=70, c=color, cmap="Set2")
+    plt.show()
+
+
+
+
+
+visualize(out, color=hdata['user'].y)
