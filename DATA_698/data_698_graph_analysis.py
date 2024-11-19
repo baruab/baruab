@@ -118,6 +118,11 @@ df_ac_log['week_id'] = df_ac_log['date'].dt.isocalendar().week
 # create year_month_id based on year_id and month_id
 df_ac_log['year_month_id'] = df_ac_log['year_id'].astype(int)*100 + df_ac_log['month_id'].astype(int)
 
+# remove rows with 201709 year_month_id from df_ac_log
+df_ac_log = df_ac_log[df_ac_log['year_month_id'] != 201709]
+
+print(df_ac_log.shape)
+
 # Reassign the year_month_id to snapshot_ID (make it easier later for splitting graphs)
 
 year_months = df_ac_log['year_month_id'].unique()
@@ -379,6 +384,9 @@ print("Most similar products to product:", [product_id_to_name[i] for i in most_
 # Add time spent data to centrality scores
 time_spent = df_session_log.groupby("Product")["TimeSpent"].mean()
 weighted_pagerank = {k: v * time_spent.get(k, 1) for k, v in pagerank.items()}
+print("Weighted PageRank:", weighted_pagerank)
+
+"""Weighted Pagerank of similar products"""
 
 from sklearn.manifold import TSNE
 
@@ -472,11 +480,15 @@ plt.show()
 """Generate Traffic Heatmap"""
 
 # Aggregate by time windows and products
-df_session_log['TimeWindow'] = df_session_log['timestamp'].dt.floor('H')  # Group by hourly windows
-traffic = df_session_log.groupby(['TimeWindow', 'Product_Id']).size().reset_index(name='InteractionCount')
+#df_session_log['TimeWindow'] = df_session_log['timestamp'].dt.floor('H')  # Group by hourly windows
+
+# group by days instead for TimeWindow using timestamp
+df_session_log['TimeWindow'] = df_session_log['timestamp'].dt.floor('D')  # Group by hourly windows
+
+traffic = df_session_log.groupby(['TimeWindow', 'Department_Id']).size().reset_index(name='InteractionCount')
 
 # Create pivot table
-heatmap_data = traffic.pivot(index='TimeWindow', columns='Product_Id', values='InteractionCount').fillna(0)
+heatmap_data = traffic.pivot(index='TimeWindow', columns='Department_Id', values='InteractionCount').fillna(0)
 print(heatmap_data)
 
 traffic.head()
@@ -501,14 +513,24 @@ plt.show()
 
 # Aggregate separately by interaction type
 traffic_by_type = df_session_log.groupby(['TimeWindow', 'Product_Id', 'interaction']).size().reset_index(name='InteractionCount')
+print(traffic_by_type)
+
+# Aggregate by time window
+time_agg = traffic_by_type.groupby(['TimeWindow', 'interaction'])['InteractionCount'].sum().unstack(fill_value=0)
+
+# Plot traffic over time
+time_agg.plot(figsize=(15, 6), title="Traffic Over Time", xlabel="Time Window", ylabel="Interaction Count")
+plt.grid(True)
+plt.show()
 
 heatmap_data = heatmap_data.div(heatmap_data.sum(axis=0), axis=1)  # Normalize by column
+print(heatmap_data)
 
 import plotly.express as px
 
 fig = px.imshow(
     heatmap_data.T,
-    labels=dict(x="Time Window", y="Product ID", color="Interaction Count"),
+    labels=dict(x="Time Window", y="Department ID", color="Interaction Count"),
     x=heatmap_data.index.strftime('%Y-%m-%d %H:%M:%S'),  # Format time
     y=heatmap_data.columns,
     color_continuous_scale="YlGnBu"
@@ -578,5 +600,5 @@ for _, row in transitions.iterrows():
                labels=[row['interaction'], row['NextInteraction']],
                orientations=[0, 0])
 sankey.finish()
-plt.title("Flow Diagram: view to AddToCart")
+plt.title("Flow Diagram: view to buy")
 plt.show()
