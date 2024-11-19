@@ -326,58 +326,6 @@ print("Torch version:", torch.__version__)
 print("PyTorch Geometric version:", torch_geometric.__version__)
 #print("PyTorch Geometric Temporal version:", torch_geometric_temporal.__version__)
 
-"""
-from torch_geometric_temporal.signal import temporal_signal_split, DynamicGraphTemporalSignal
-import torch
-
-# 1. Prepare temporal snapshots
-# Example: Assume you have processed your data into time-wise snapshots
-num_time_steps = 10  # Number of temporal snapshots
-node_features = []   # List to store node features for each time step
-edge_indices = []    # List to store edge indices for each time step
-edge_attrs = []      # List to store edge attributes (optional)
-labels = []          # List to store target labels for each time step
-
-for t in range(num_time_steps):
-    # Extract features, edges, etc., for time t from HeteroData
-    node_features.append({
-        'user': hdata['user'].x,        # User features for time t
-        'product': hdata['product'].x   # Product features for time t
-    })
-    edge_indices.append({
-        ('user', 'buy', 'product'): hdata[('user', 'buy', 'product')].edge_index,  # Edges
-        ('product', 'rev_buy', 'user'): hdata[('product', 'rev_buy', 'user')].edge_index
-    })
-    # Optional: edge attributes or labels
-    edge_attrs.append({
-        ('user', 'buy', 'product'): hdata[('user', 'buy', 'product')].edge_attr,
-        ('product', 'rev_buy', 'user'): hdata[('product', 'rev_buy', 'user')].edge_attr
-    })
-    labels.append(hdata['user'].y)  # Assume labels are user-focused
-
-# 2. Create a DynamicGraphTemporalSignal object
-temporal_data = DynamicGraphTemporalSignal(
-    edge_indices=edge_indices,
-    edge_features=edge_attrs,  # Optional
-    node_features=node_features,
-    targets=labels  # Optional, for supervised tasks
-)
-
-# 3. Split into train and test datasets
-train_dataset, test_dataset = temporal_signal_split(temporal_data, train_ratio=0.8)
-
-# Print stats
-print(f"Train snapshots: {len(train_dataset)}")
-print(f"Test snapshots: {len(test_dataset)}")
-
-# 4. Access data for each time step during training
-for snapshot in train_dataset:
-    x_t = snapshot.node_features  # Node features at time t
-    edge_index_t = snapshot.edge_index  # Edge indices at time t
-    edge_attr_t = snapshot.edge_features  # Edge attributes at time t (if available)
-    y_t = snapshot.target  # Target labels at time t (if available)
-"""
-
 #from google.colab import files
 #uploaded = files.upload()  # Upload the file from your local machine
 
@@ -470,7 +418,7 @@ print(product_y.shape)
 """# Create DynamicGraphTemporalSignal object"""
 
 # Initialize buy_edge_index as an empty list outside the loop
-buy_edge_index = []
+edge_index = []
 session_hdata_list = []
 
 node_features=[]
@@ -483,8 +431,10 @@ labels=[]
 #for i in range(len(split_dfs)):
 #  46556 max number of sessions
 
-for i in range(1,50):
-  buy_edge_index = []
+for i in range(1,5000):
+  edge_index = []
+  temp_weights=[]
+  temp_labels=[]
 
   split_dfs[i] = split_dfs[i].sort_values(by='time')
   # Convert 'time' column to datetime objects
@@ -543,23 +493,16 @@ for i in range(1,50):
   #print(df_temp_user_features)
 
 
-  # Edge / edge index
-  #temp_edge_index = split_dfs[i][["AddToCart"]].values.transpose()
-  #temp_edge_index = torch.tensor(temp_edge_index, dtype=torch.float)
-  #print("!!!! temp_edge_index !!!")
-  #print(temp_edge_index)
-  #print(temp_edge_index.shape)
-
   num_edges = len(split_dfs[i])
   for j in range(num_edges):
-    # if AddToCart == 1 then add the edge
-    if split_dfs[i]["AddToCart"].iloc[j] == 1:
-      buy_edge_index.append([split_dfs[i]["ip_id"].iloc[j], split_dfs[i]["Product_Id"].iloc[j]]) # Access element by index j
+    edge_index.append([split_dfs[i]["ip_id"].iloc[j], split_dfs[i]["Product_Id"].iloc[j]]) # Access element by index j
+    temp_weights.append([split_dfs[i]["AddToCart"].iloc[j]])
 
-  num_buys_in_session = len(buy_edge_index)
-  temp_edge_index = torch.tensor(buy_edge_index, dtype=torch.long).t().contiguous()
-  print(temp_edge_index)
-  print(temp_edge_index.shape)
+  temp_labels.append(split_dfs[i]['num_buys'].mean())
+  print("temp_labels = ", temp_labels)
+  temp_edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+  print("edge_index =", temp_edge_index)
+  print("edge_index shape =", temp_edge_index.shape)
 
 
   ##### Build the dataset
@@ -571,7 +514,7 @@ for i in range(1,50):
   temp_data['user'].id = split_dfs[i]['ip_id'].unique() # df_temp_user_node['ip_id']
   temp_data['user'].session_id = split_dfs[i]['date_ip_id'].unique() # df_temp_user_node['ip_id']
   temp_data['user'].x = df_temp_user_features
-  temp_data['user'].y = num_buys
+  temp_data['user'].y = temp_labels
 
 
   temp_data['product'].x = df_temp_product_features
@@ -579,9 +522,9 @@ for i in range(1,50):
   temp_data['product'].num_nodes = len(df_temp_product_features) # Assuming df_product_features is a DataFrame or array of product features
   temp_data['user', 'buy', 'product'].edge_index = temp_edge_index
   temp_data['user', 'buy', 'product'].edge_type = 'buy'
-  temp_data['user', 'buy', 'product'].edge_label = num_buys_in_session
+  temp_data['user', 'buy', 'product'].edge_label = num_buys
   temp_data['product', 'rev_buy', 'user'].edge_index = temp_edge_index.flip(0)
-  temp_data['product', 'rev_buy', 'user'].edge_label = num_buys_in_session
+  temp_data['product', 'rev_buy', 'user'].edge_label = num_buys
 
   session_hdata_list.append(temp_data)
 
@@ -593,16 +536,24 @@ for i in range(1,50):
       'user': temp_data['user'].x,
       'product': temp_data['product'].x
   })
+  print(" temp_data['user'].x.shape = ", temp_data['user'].x.shape)
+  print(" temp_data['product'].x.shape = ", temp_data['product'].x.shape)
+
   edge_indices.append(temp_edge_index)
-  edge_weights.append(num_buys_in_session)
+  temp_edge_weight = torch.tensor(temp_weights, dtype=torch.float).reshape(-1)
+  edge_weights.append(temp_edge_weight)
+  print("edge_weights shape = " , temp_edge_weight.shape)
 
   edge_labels.append({
       ('user', 'buy', 'product'): temp_data[('user', 'buy', 'product')].edge_label,
       ('product', 'rev_buy', 'user'): temp_data[('product', 'rev_buy', 'user')].edge_label
   })
-
-  labels.append(temp_data['user'].y)
+  label = torch.tensor(temp_data['user'].y, dtype=torch.float).reshape(-1)
+  labels.append(label)
   labels = [torch.tensor([label], dtype=torch.float) for label in labels]  # Convert each label to a tensor
+  print("labels/target = ", label)
+  print("labels/target shape = ", label.shape)
+
   print("~~~~ ", i)
 #print(node_features)
 
@@ -626,14 +577,16 @@ for snapshot_features in node_features:
 
     node_features_list.append(all_features)
 
-!pip install torch_geometric_temporal
+from google.colab import files
+uploaded = files.upload()  # Upload the file from your local machine
+
+!mv tsagcn.py /usr/local/lib/python3.10/dist-packages/torch_geometric_temporal/nn/attention
+
+#!pip install torch_geometric_temporal
 import numpy as np
 import torch
 from torch_geometric_temporal.signal import temporal_signal_split, DynamicGraphTemporalSignal
 import pandas as pd
-
-from torch_geometric_temporal.signal import temporal_signal_split, DynamicGraphTemporalSignal
-import torch
 
 edge_labels_tensors = []
 for edge_label_dict in edge_labels:
@@ -641,6 +594,42 @@ for edge_label_dict in edge_labels:
     edge_label = edge_label_dict[('user', 'buy', 'product')]
     # Convert to tensor and append
     edge_labels_tensors.append(torch.tensor([edge_label], dtype=torch.float))
+
+
+
+# Modify the _get_additional_feature method
+def _get_additional_feature(self, time_index, feature_key):
+    feature = getattr(self, feature_key)[time_index]
+    # Check if feature is a PyTorch tensor
+    if isinstance(feature, torch.Tensor):
+        # If it's a tensor, get the dtype kind using 'kind' attribute if available,
+        # otherwise, use the dtype name directly.
+        dtype_kind = feature.dtype.kind if hasattr(feature.dtype, 'kind') else feature.dtype
+    else:
+        # If it's not a tensor, get the dtype kind as before
+        dtype_kind = feature.dtype.kind
+
+    if dtype_kind == "i" or dtype_kind == torch.int64:  # Handle both cases
+        return torch.LongTensor(feature)
+    elif dtype_kind == "f" or dtype_kind == torch.float32: # Handle both cases
+        return torch.FloatTensor(feature)
+    else:  # Handle other dtypes or raise an exception
+        return feature  # Or raise an exception if needed
+
+
+# Apply the monkey patch to DynamicGraphTemporalSignal
+DynamicGraphTemporalSignal._get_additional_feature = _get_additional_feature
+
+
+# Ensure node_features_list and labels have the same length
+# This is a critical step to fix the "Temporal dimension inconsistency" error
+min_len = min(len(node_features_list), len(labels))
+node_features_list = node_features_list[:min_len]
+edge_indices = edge_indices[:min_len]  # Add this line to truncate edge_indices as well
+edge_weights = edge_weights[:min_len]  # Add this line to truncate edge_weights as well
+edge_labels_tensors = edge_labels_tensors[:min_len]  # Add this line to truncate edge_labels_tensors as well
+labels = labels[:min_len]
+
 
 temporal_data = DynamicGraphTemporalSignal(
     edge_indices=edge_indices,
@@ -650,12 +639,8 @@ temporal_data = DynamicGraphTemporalSignal(
     targets=labels
 )
 
-
 # Split into train and test datasets
 train_dataset, test_dataset = temporal_signal_split(temporal_data, train_ratio=0.8)
-
-print(train_dataset)
-print(type(train_dataset))
 
 # Convert targets to a NumPy array
 train_dataset.targets = [np.array(target) for target in train_dataset.targets]
@@ -664,35 +649,266 @@ train_dataset.targets = [np.array(target) for target in train_dataset.targets]
 train_dataset.targets = [np.array(target) for target in train_dataset.targets]
 test_dataset.targets = [np.array(target) for target in test_dataset.targets]
 
+"""
+# Check for empty edge indices in the train dataset and handle them
+train_dataset_filtered = []
+for snapshot in train_dataset:
+    # Check if edge_index is empty by checking its dimension
+    # If it has 2 dimensions and the second dimension is greater than 0, it's not empty
+    if snapshot.edge_index.dim() == 2 and snapshot.edge_index.size(1) > 0:
+        train_dataset_filtered.append(snapshot)
+    else:
+        print("Warning: Skipping snapshot with empty edge index.")
+
+train_dataset = train_dataset_filtered  # Replace the original dataset
+"""
+
+print(train_dataset)
+print(type(train_dataset))
+
+
+print(f"Edge Indices: {[ei.shape for ei in edge_indices]}")
+#print(f"Edge Weights: {[ew.shape for ew in edge_weights]}")
+print(f"Edge Features: {[ef.shape for ef in edge_labels_tensors]}")
+print(f"Node Features: {[nf.shape for nf in node_features_list]}")
+print(f"Targets: {[t.shape for t in labels]}")
+
+
 # Now iterate over snapshots
 for snapshot in train_dataset:
-    x_t = snapshot.features  # Node features at time t
+    x_t = snapshot.x
     edge_index_t = snapshot.edge_index  # Edge indices at time t
-    y_t = snapshot.targets  # Targets at time t
+    y_t = snapshot.y  # Targets at time t
 
     # Check if x_t is a tensor, and if so, get its dtype kind
-    feature_kind = x_t.dtype.kind if isinstance(x_t, torch.Tensor) else None
+    feature_kind = 'f' if x_t.dtype.is_floating_point else 'i' if x_t.dtype.is_complex else None
 
     # Print the shape with the feature kind if it's a tensor
-    print(f"Features: {x_t.shape}, Edge Indices: {edge_index_t.shape}, Targets: {y_t.shape}, Feature Kind: {feature_kind}")
+    # print(f"Features: {x_t.shape}, Edge Indices: {edge_index_t.shape}, Targets: {y_t.shape}, Feature Kind: {feature_kind}")
+
+"""#  Define Temporal Graph Neural Network (TGN) model
+
+import torch
+from torch.nn import Linear, Module
+from torch_geometric_temporal.nn.recurrent import GConvGRU
+
+class TemporalGNN(Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super(TemporalGNN, self).__init__()
+        self.recurrent = GConvGRU(in_channels, hidden_channels, 1)  # in_channels=1
+        self.linear = Linear(hidden_channels, out_channels)  # Final classifier
+
+    def forward(self, x, edge_index, edge_weight=None, h=None):
+        # Ensure edge_index is within the bounds of the node features
+        num_nodes = x.shape[0]
+        edge_index = edge_index[:, (edge_index < num_nodes).all(dim=0)]
+
+        # Handle no valid edges
+        if edge_index.shape[1] == 0:
+            if h is None:
+                h = torch.zeros((num_nodes, self.recurrent.out_channels), device=x.device)
+            return self.linear(h), h
+
+        # GConvGRU forward pass
+        x = x.unsqueeze(0)  # Add batch dimension: (1, num_nodes, in_channels)
+        h = self.recurrent(x, edge_index, edge_weight, h)  # Updated hidden state
+        h = h.squeeze(0)  # Remove batch dimension: (num_nodes, hidden_channels)
+
+        # Linear layer for output
+        out = self.linear(h)  # (num_nodes, out_channels)
+        return out, h
 """
-for snapshot in train_dataset:
-    x_t = snapshot.features  # Node features at time t
-    edge_index_t = snapshot.edge_index  # Edge indices at time t
-    edge_weight_t = snapshot.edge_weight  # Edge weights at time t
-    y_t = snapshot.target  # Target labels at time t
 
+import torch
+import torch.nn.functional as F  # Import F for relu
+from torch.nn import Linear, Module
+from torch_geometric_temporal.nn.recurrent import GConvGRU
+
+class RecurrentGCN(torch.nn.Module):
+    def __init__(self, node_features):
+        super(RecurrentGCN, self).__init__()
+        # Changed input features for GConvGRU to 1 to match input data
+        self.recurrent = GConvGRU(1, 32, 1)
+        self.linear = torch.nn.Linear(32, 1)
+
+    def forward(self, x, edge_index, edge_weight):
+        # Reshape x to have 2 dimensions if it only has 1
+        if x.dim() == 1:
+            x = x.unsqueeze(-1)  # Add a feature dimension
+
+        num_nodes = x.shape[0]
+        edge_index = edge_index.clamp(0, num_nodes - 1)
+
+        h = self.recurrent(x, edge_index, edge_weight)
+        h = F.relu(h)
+        h = self.linear(h)
+        return h
+
+# When initializing the model, provide 1 as the node_features to match the input.
+model = RecurrentGCN(node_features = 1)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+model.train()
+
+for epoch in range(200):
+    cost = 0
+    for time, snapshot in enumerate(train_dataset):
+        y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
+        cost = cost + torch.mean((y_hat-snapshot.y)**2)
+    cost = cost / (time+1)
+    cost.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+model.eval()
+cost = 0
+for time, snapshot in enumerate(test_dataset):
+    y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
+    cost = cost + torch.mean((y_hat-snapshot.y)**2)
+cost = cost / (time+1)
+cost = cost.item()
+print("MSE: {:.4f}".format(cost))
+
+model.train()
+criterion = torch.nn.MSELoss()
+
+for epoch in range(20):
+    total_loss = 0
+    snapshot_count = 0  # Initialize a counter for snapshots
+    for snapshot in train_dataset:
+        # Reshape if necessary
+        x = snapshot.x.unsqueeze(-1) if len(snapshot.x.shape) == 1 else snapshot.x
+        y = snapshot.y.unsqueeze(-1) if len(snapshot.y.shape) == 1 else snapshot.y
+
+        # Forward pass
+        y_hat = model(x, snapshot.edge_index, snapshot.edge_attr)
+
+        # Compute loss
+        loss = criterion(y_hat, y)
+        total_loss += loss.item()
+
+        # Backward pass and optimization
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        snapshot_count += 1  # Increment the counter for each snapshot
+
+    print(f"Epoch {epoch + 1}, Loss: {total_loss / snapshot_count:.4f}")  # Use snapshot_count instead of len(train_dataset)
+
+
+# Evaluation
+model.eval()
+total_loss = 0
+snapshot_count =0
+with torch.no_grad():
+    for snapshot in test_dataset:
+        x = snapshot.x.unsqueeze(-1) if len(snapshot.x.shape) == 1 else snapshot.x
+        y = snapshot.y.unsqueeze(-1) if len(snapshot.y.shape) == 1 else snapshot.y
+
+        y_hat = model(x, snapshot.edge_index, snapshot.edge_attr)
+        loss = criterion(y_hat, y)
+        total_loss += loss.item()
+        snapshot_count += 1
+
+print(f"Test MSE: {total_loss / snapshot_count:.4f}")
+
+"""Create the training loop"""
+
+# define device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+"""Evaluate the model"""
+
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+import torch
+
+def evaluate_model(model, dataset, device):
+    model.eval()  # Set the model to evaluation mode
+    y_true, y_pred = [], []
+
+    with torch.no_grad():
+        for snapshot in dataset:
+            x = snapshot.x.to(device)  # Node features
+            edge_index = snapshot.edge_index.to(device)  # Edge indices
+            y = snapshot.y.to(device)  # Ground truth labels
+
+            # Forward pass to get predictions
+            out = model(x, edge_index)
+            pred = out.argmax(dim=1)  # Get class predictions
+
+            # Append predictions and true labels for this snapshot
+            y_true.append(y.cpu().numpy())
+            y_pred.append(pred.cpu().numpy())
+
+    # Flatten arrays for metric computation
+    y_true = np.concatenate(y_true)
+    y_pred = np.concatenate(y_pred)
+
+    # Compute evaluation metrics
+    accuracy = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred, average="weighted")
+    precision = precision_score(y_true, y_pred, average="weighted")
+    recall = recall_score(y_true, y_pred, average="weighted")
+
+    print(f"Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}")
+    return accuracy, f1, precision, recall
+
+"""Evaluate using the training dataset and test dataset
+
+Track performance over time
 """
 
+def evaluate_model_per_snapshot(model, dataset, device):
+    model.eval()
+    snapshot_metrics = []
 
-# Print stats
-#print(f"Train snapshots: {len(train_dataset.snapshots)}")
-#print(f"Test snapshots: {len(test_dataset.snapshots)}")
+    with torch.no_grad():
+        for idx, snapshot in enumerate(dataset):
+            x = snapshot.x.to(device)
+            edge_index = snapshot.edge_index.to(device)
+            y = snapshot.y.to(device)
 
-"""Define Training and Evaluation Functions
+            # If your dataset doesn't have edge_weight, create a tensor of ones
+            # with the same shape as edge_index to represent uniform edge weights.
+            edge_weight = torch.ones(edge_index.shape[1]).to(device)
 
-# Create Train/Validation/Test Splits
-"""
+            out = model(x, edge_index, edge_weight)  # Pass edge_weight to the model
+
+            # Get the indices of the nodes for which you have ground truth labels.
+            # Assuming 'y' has a value of -1 for nodes without labels,
+            # you can filter these out using a mask.
+            labeled_indices = torch.where(y != -1)[0]
+
+            # Select predictions and labels for the labeled nodes only
+            out = out[labeled_indices]
+            y = y[labeled_indices]
+
+            pred = out.argmax(dim=1)
+
+            # Print shapes for debugging
+            print(f"y shape: {y.shape}, pred shape: {pred.shape}")
+
+            # Compute accuracy for this snapshot
+            acc = accuracy_score(y.cpu().numpy(), pred.cpu().numpy())
+            snapshot_metrics.append(acc)
+            print(f"Snapshot {idx + 1} Accuracy: {acc:.4f}")
+
+    return snapshot_metrics
+
+"""Visualize performance over time"""
+
+import matplotlib.pyplot as plt
+
+snapshot_metrics = evaluate_model_per_snapshot(model, test_dataset, device)
+plt.plot(range(len(snapshot_metrics)), snapshot_metrics, marker='o')
+plt.title("Snapshot-wise Accuracy")
+plt.xlabel("Snapshot Index")
+plt.ylabel("Accuracy")
+plt.show()
+
+"""# Create Train/Validation/Test Splits"""
 
 from sklearn.model_selection import train_test_split
 
@@ -717,3 +933,84 @@ test_mask[test_idx] = True
 hdata['user', 'buy', 'product'].train_mask = train_mask
 hdata['user', 'buy', 'product'].val_mask = val_mask
 hdata['user', 'buy', 'product'].test_mask = test_mask
+
+"""Convert into NetworkX graphs"""
+
+from torch_geometric.utils import to_networkx
+import matplotlib.pyplot as plt
+import networkx as nx
+
+# Extract graph for each timestamp
+for t, snapshot in enumerate(train_dataset):  # Assuming train_dataset is temporal
+    # Convert snapshot to NetworkX
+    g_nx = to_networkx(
+        data=snapshot,
+        node_attrs=['x'],  # Add desired node attributes for visualization
+        edge_attrs=['edge_attr']  # Add desired edge attributes
+    )
+
+    # Visualize the graph
+    plt.figure(figsize=(10, 7))
+    pos = nx.spring_layout(g_nx)  # Compute layout
+    nx.draw(
+        g_nx, pos, with_labels=True, node_size=500, font_size=10,
+        node_color='skyblue', edge_color='gray'
+    )
+    plt.title(f"Graph at Time Step {t}")
+    plt.show()
+
+"""Highlight node and edge types"""
+
+# Example: Heterogeneous visualization with color coding
+for t, snapshot in enumerate(train_dataset):
+    node_colors = []
+    edge_colors = []
+
+    try:
+        # Try accessing metadata, if available
+        node_types, edge_types = snapshot.metadata()
+    except AttributeError:
+        # If metadata is not available, provide default behavior or handle it
+        print(f"Warning: Metadata not found for snapshot at time step {t}. Using default visualization.")
+        # Infer node and edge types if metadata() is not available
+        # You might need to adapt this based on your specific data structure
+        node_types = list(set(snapshot.x.tolist())) # Assuming node types are encoded in 'x'
+        edge_types = list(set(snapshot.edge_attr.tolist())) # Assuming edge types are encoded in 'edge_attr'
+
+
+        # Assign default colors or handle the lack of metadata accordingly
+        node_colors = ['gray'] * len(node_types)  # Default color for all nodes
+        edge_colors = ['black'] * len(edge_types)  # Default color for all edges
+
+        # Example: If node types are integers, you might assign colors based on their values
+        # node_colors = [plt.cm.get_cmap('viridis')(node_type) for node_type in node_types]
+
+
+# Example: Heterogeneous visualization with color coding
+for t, snapshot in enumerate(train_dataset):
+    g_nx = to_networkx(snapshot, to_undirected=True)
+
+    # Get node features and ensure they are iterable
+    node_features = snapshot.x.tolist()  # Assuming 'x' contains node features
+
+    # Ensure node_colors has the same length as the number of nodes in the graph
+    # and that node features are treated correctly
+    node_colors = [
+        plt.cm.get_cmap('viridis')(node_feature[0] if isinstance(node_feature, list) else node_feature)  # Handle single float features
+        for node_feature in node_features
+        if isinstance(node_feature, (list, float))  # Check if node_feature is iterable or a float
+    ]
+
+    # If node_colors is shorter than the number of nodes, extend it with a default color
+    if len(node_colors) < len(g_nx.nodes):
+        node_colors.extend(['gray'] * (len(g_nx.nodes) - len(node_colors)))
+
+    plt.figure(figsize=(10, 7))
+    # Generate positions for nodes if 'pos' is not defined in your code
+    pos = nx.spring_layout(g_nx)
+    nx.draw(
+        g_nx, pos, with_labels=True, node_size=500, font_size=10,
+        node_color=node_colors, edge_color=edge_colors
+    )
+    plt.title(f"Heterogeneous Graph at Time Step {t}")
+    plt.show()
