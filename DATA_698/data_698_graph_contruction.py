@@ -485,6 +485,57 @@ edge_embeddings = torch.cat([user_embeddings, product_embeddings], dim=1)
 # Now `edge_embeddings` contains an embedding for each ("user", "buy", "product") edge
 print("Edge embeddings shape:", edge_embeddings.shape)
 
+"""For better visualization, let's try to cluster the User nodes"""
+
+# K-Means clustering
+
+from sklearn.cluster import KMeans
+import numpy as np
+import torch
+
+# Perform KMeans clustering
+num_clusters = 5
+kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+
+# Detach the tensor and convert it to a NumPy array
+user_embeddings_np = user_embeddings.detach().cpu().numpy()
+
+# Fit KMeans to the NumPy array
+labels = kmeans.fit_predict(user_embeddings_np)
+
+# 'labels' contains the cluster ID for each user
+print(labels)
+
+"""Spectral Custering"""
+
+from sklearn.cluster import SpectralClustering
+
+# Perform Spectral Clustering
+spectral = SpectralClustering(n_clusters=num_clusters, affinity='nearest_neighbors', random_state=42)
+
+# Detach the tensor and convert it to a NumPy array
+user_embeddings_np = user_embeddings.detach().cpu().numpy()
+
+# Use the NumPy array for clustering
+labels = spectral.fit_predict(user_embeddings_np)
+
+print(labels)
+
+"""Visualize clustering"""
+
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+
+# Reduce embeddings to 2D
+# Detach the tensor and convert it to a NumPy array before passing it to TSNE
+reduced_embeddings = TSNE(n_components=2, random_state=42).fit_transform(user_embeddings.detach().numpy())
+
+# Visualize clusters
+plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=labels, cmap='viridis', s=50)
+plt.title("User Clusters Based on Interaction Patterns")
+plt.colorbar()
+plt.show()
+
 """Define Training and Evaluation Functions"""
 
 # Add training loop
