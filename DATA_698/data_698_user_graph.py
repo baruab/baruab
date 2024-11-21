@@ -79,6 +79,8 @@ map_dept = dict(zip(depts, new_dept_ids))
 
 df_ac_log['Department_Id'] = df_ac_log['Department'].map(map_dept)
 
+df_ac_log.info()
+
 #Split date
 
 df_ac_log['date_id'] = df_ac_log['Date'].str.split('/').str[1]
@@ -214,8 +216,6 @@ df_ac_log = df_ac_log.sort_values(by=['Session_ID', 'time'])
 df_ac_log.head()
 df_ac_log.info()
 
-
-
 df_ac_log.head()
 
 """# User based analysis"""
@@ -271,11 +271,6 @@ df_session_log['NextProduct'] = df_session_log.groupby('Session_ID')['Product'].
 
 # Aggregate interaction sequences for each session
 df_session_log['InteractionSequence'] = df_session_log.groupby('Session_ID')['interaction'].transform(lambda x: ' -> '.join(x))
-
-df_session_log.head(15)
-
-df_session_log['InteractionSequence'] = df_session_log.groupby('Session_ID')['interaction'].transform(lambda x: ' -> '.join(x))
-
 df_session_log.head(15)
 
 # Drop rows where there is no transition
@@ -422,4 +417,110 @@ plt.title("User Clusters")
 
 # add legend
 plt.legend(['Buying User', 'Drop-offs'])
+plt.show()
+
+"""# Create a subset of df_session_log with ip_id, Product_Id, City, AddToCart"""
+
+# Create a subset of df_session_log with ip_id, Product_Id, City, AddToCart
+df_log_subset = df_ac_log[['Session_ID' ,'ip_id', 'Product_Id', 'City', 'AddToCart']]
+
+# filter AddToCart ==1
+df_user_segmentation = df_log_subset[df_log_subset['AddToCart'] ==1]
+
+df_user_segmentation.head()
+
+print(df_user_segmentation.shape)
+
+# print unique ip_id
+print(df_user_segmentation['ip_id'].nunique())
+
+# print unique Product_Id
+print(df_user_segmentation['Product_Id'].nunique())
+
+# print unique session_ID
+print(df_session_log['Session_ID'].nunique())
+
+# print where drop_off == 0
+print(session_df[session_df['Drop_Off'] == 0]['Session_ID'].nunique())
+
+# print where drop_off == 0
+print(session_df[session_df['Drop_Off'] == 1]['Session_ID'].nunique())
+
+print(df_user_segmentation.shape)
+
+# Initialize a graph
+G = nx.Graph()
+
+# Add nodes for each user
+for _, row in df_user_segmentation.iterrows():
+    G.add_node(row['ip_id'], city=row['City'])
+
+# Add edges based on shared purchases
+for product, group in df_user_segmentation.groupby('Product_Id'):
+    users = group['ip_id'].tolist()
+    for i in range(len(users)):
+        for j in range(i + 1, len(users)):
+            G.add_edge(users[i], users[j], type='shared_purchase', weight=1)
+
+"""
+# Add edges based on geographic proximity
+for i, user1 in df_user_segmentation.iterrows():
+    for j, user2 in df_user_segmentation.iterrows():
+        if i < j:
+            # Calculate geographic distance
+            loc1 = user1['City']
+            loc2 = user2['City']
+
+            if loc1 == loc2:  # Same city
+                G.add_edge(user1['ip_id'], user2['ip_id'], type='geo_proximity', weight=1)
+"""
+
+# Print graph nodes and edges
+
+
+#print(nx.info(G))
+
+"""Learn Node Representation"""
+
+!pip install node2vec
+
+from node2vec import Node2Vec
+
+# Generate embeddings using Node2Vec
+node2vec = Node2Vec(G, dimensions=16, walk_length=10, num_walks=100, workers=4)
+model = node2vec.fit(window=5, min_count=1, batch_words=4)
+
+# Get embeddings as a DataFrame
+embeddings = pd.DataFrame([model.wv[str(node)] for node in G.nodes], index=G.nodes)
+print(embeddings.head())
+
+"""Cluster User based on Node learnings (embeddings)"""
+
+from sklearn.cluster import KMeans
+
+# Cluster embeddings
+kmeans = KMeans(n_clusters=3, random_state=42)
+clusters = kmeans.fit_predict(embeddings)
+
+# Add cluster labels to the DataFrame
+clustered_users = pd.DataFrame({'User_ID': embeddings.index, 'Cluster': clusters})
+print(clustered_users)
+
+"""Visualize the clusters"""
+
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+
+# Reduce dimensions for visualization
+pca = PCA(n_components=2)
+reduced_embeddings = pca.fit_transform(embeddings)
+
+# Plot the clusters
+plt.figure(figsize=(10, 6))
+plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=clusters, cmap='coolwarm', alpha=0.8)
+for i, user in enumerate(embeddings.index):
+    plt.annotate(user, (reduced_embeddings[i, 0], reduced_embeddings[i, 1]))
+plt.title("User Segments Based on Shared Purchases")
+plt.xlabel("PCA Dimension 1")
+plt.ylabel("PCA Dimension 2")
 plt.show()
