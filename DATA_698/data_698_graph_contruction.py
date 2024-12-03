@@ -43,6 +43,16 @@ df_ac_log['date'] = pd.to_datetime(df_ac_log['Dt'])
 df_ac_log['day_of_week'] = df_ac_log['date'].dt.day_name()
 df_ac_log['weekday'] = df_ac_log['date'].dt.weekday
 
+
+
+from datetime import datetime, timedelta
+print(type(df_ac_log['date']))
+df_ac_log['date1']= pd.to_datetime(df_ac_log['date'])
+# remove rows with 20170914 date1 from df_ac_log due to unusual spike
+df_ac_log = df_ac_log[df_ac_log['date1'] != '2017-09-14']
+
+print(df_ac_log.shape)
+
 df_ac_log["AddToCart"] = df_ac_log["url"].str.contains("add_to_cart").astype(int) # str.extract("(add_to_cart)")
 #df_ac_log.head()
 
@@ -484,6 +494,8 @@ edge_embeddings = torch.cat([user_embeddings, product_embeddings], dim=1)
 
 # Now `edge_embeddings` contains an embedding for each ("user", "buy", "product") edge
 print("Edge embeddings shape:", edge_embeddings.shape)
+print(user_embeddings.shape)
+print(product_embeddings.shape)
 
 """For better visualization, let's try to cluster the User nodes"""
 
@@ -521,6 +533,8 @@ labels = spectral.fit_predict(user_embeddings_np)
 
 print(labels)
 
+print(user_embeddings.shape)
+
 """Visualize clustering"""
 
 from sklearn.manifold import TSNE
@@ -535,6 +549,8 @@ plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=labels, cmap='
 plt.title("User Clusters Based on Interaction Patterns")
 plt.colorbar()
 plt.show()
+
+print(reduced_embeddings.shape)
 
 """Define Training and Evaluation Functions"""
 
@@ -909,7 +925,45 @@ def visualize(h, color):
     plt.scatter(z[:, 0], z[:, 1], s=70, c=color, cmap="Set2")
     plt.show()
 
+"""Compare the results"""
 
+import matplotlib.pyplot as plt
+
+model1_loss = [0.5967,0.5966, 0.5965, 0.5964,0.5964,0.5964,0.5964,0.5963,0.5963,0.5963,0.5963]  # Store loss for Model 1
+model1_accuracy = [0.7173, 0.7173,0.7173,0.7173,0.7173,0.7173,0.7173,0.7173,0.7173,0.7173,0.7173]  # Store accuracy for Model 1
+model2_loss = [0.1676, 0.1593, 0.1567, 0.1561, 0.1497, 0.1414, 0.1383, 0.1365, 0.1325, 0.1341, 0.1376]  # Store loss for Model 2
+model2_accuracy = [0.7171, 0.7171, 0.7171, 0.7171, 0.7171, 0.7171, 0.7171, 0.7171, 0.7171, 0.7171, 0.7171]  # Store accuracy for Model 2
+
+# Define x-axis values for the plots
+epochs_range = []
+num_epochs = 50
+for epoch in range(1, num_epochs + 1):
+    if epoch % 5 == 0 or epoch == 1:
+      epochs_range.append(epoch)
+
+# Plot Loss
+
+plt.figure(figsize=(12, 6))
+plt.plot(epochs_range, model1_loss, label='SAGE Model Loss', marker='o') # Plot model1_loss against epochs_range
+plt.plot(epochs_range, model2_loss, label='HAN Model Loss', marker='o')  # Plot model2_loss against epochs_range
+
+plt.title("Loss Comparison Between Models")
+plt.xlabel("Epochs")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid()
+plt.show()
+
+# Plot Accuracy
+plt.figure(figsize=(12, 6))
+plt.plot(epochs_range, model1_accuracy, label='SAGE Model Accuracy', marker='o')
+plt.plot(epochs_range, model2_accuracy, label='HAN Model Accuracy', marker='o')
+plt.title("Accuracy Comparison Between Models")
+plt.xlabel("Epochs")
+plt.ylabel("Accuracy")
+plt.legend()
+plt.grid()
+plt.show()
 
 
 
