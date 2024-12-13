@@ -518,7 +518,7 @@ labels = kmeans.fit_predict(user_embeddings_np)
 # 'labels' contains the cluster ID for each user
 print(labels)
 
-"""Spectral Custering"""
+"""Spectral Custering
 
 from sklearn.cluster import SpectralClustering
 
@@ -532,6 +532,7 @@ user_embeddings_np = user_embeddings.detach().cpu().numpy()
 labels = spectral.fit_predict(user_embeddings_np)
 
 print(labels)
+"""
 
 print(user_embeddings.shape)
 
@@ -708,6 +709,52 @@ for epoch in range(1, num_epochs + 1):
     if epoch % 5 == 0 or epoch == 1:
         val_acc = evaluate(hdata['user', 'buy', 'product'].val_mask)
         print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Val Accuracy: {val_acc:.4f}')
+
+"""TEST with GNNExplainer"""
+
+from torch_geometric.data import HeteroData
+from torch_geometric.explain import Explainer, CaptumExplainer
+
+
+explainer = Explainer(
+    model,  # It is assumed that model outputs a single tensor.
+    algorithm=CaptumExplainer('IntegratedGradients'),
+    explanation_type='model',
+    node_mask_type='attributes',
+    edge_mask_type='object',
+    model_config = dict(
+        mode='multiclass_classification',
+        task_level='node',
+        return_type='probs',  # Model returns probabilities.
+    ),
+)
+
+def get_prediction(model, x_dict, edge_index_dict, index):
+    out = model(x_dict, edge_index_dict)
+    # Assuming you want to explain predictions for 'user' nodes
+    # and that the model outputs a dictionary with 'user' as a key
+    if isinstance(out, dict) and 'user' in out:
+        return out['user'][index['user']]  # Extract user predictions
+    else:
+        # Handle other output formats or node types if necessary
+        raise ValueError("Model output format not supported for explanation.")
+
+for key, x in hdata.x_dict.items():
+    hdata.x_dict[key] = x.float().requires_grad_()
+
+index = {'user': torch.tensor([1, 3])}
+
+# Generate batch-wise heterogeneous explanations for
+# the nodes at index `1` and `3`:
+# Modify the call to explainer to use the custom prediction function
+hetero_explanation = explainer(
+    hdata.x_dict,
+    hdata.edge_index_dict,
+    index=index,
+
+)
+print(hetero_explanation.edge_mask_dict)
+print(hetero_explanation.node_mask_dict)
 
 """Implementation of GAT Layer with PyTorch"""
 
@@ -908,6 +955,91 @@ for epoch in range(1, num_epochs + 1):
     if epoch % 5 == 0 or epoch == 1:
         val_acc = evaluate(hdata['user', 'buy', 'product'].val_mask)
         print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Val Accuracy: {val_acc:.4f}')
+
+"""Implement GNNExplainer"""
+
+!pip install captum
+
+print(hdata.edge_index_dict)
+
+num_user_nodes = hdata['user'].x.size(0)  # Number of 'user' nodes
+# The 'user' nodes are indexed from 0 to num_user_nodes - 1
+print(num_user_nodes)
+
+print(hdata.edge_index_dict[("user", "buy", "product")])
+
+for node_type in hdata.node_types:
+    print(node_type, hdata[node_type].x.size(0))
+
+from torch_geometric.data import Data
+from torch_geometric.explain import Explainer, GNNExplainer
+
+data = hdata.to_homogeneous()  # A homogeneous graph data object.
+
+explainer = Explainer(
+    model=model,
+    algorithm=GNNExplainer(epochs=200),
+    explanation_type='model',
+    node_mask_type='attributes',
+    edge_mask_type='object',
+    model_config=dict(
+        mode='multiclass_classification',
+        task_level='node',
+        return_type='log_probs',  # Model returns log probabilities.
+    ),
+)
+print(data)
+
+# Generate explanation for the node at index `10`:
+
+explanation = explainer(data.x, data.edge_index, index={'user': 0})
+print(explanation.edge_mask)
+print(explanation.node_mask)
+
+from torch_geometric.data import HeteroData
+from torch_geometric.explain import Explainer, CaptumExplainer
+
+
+explainer = Explainer(
+    model,  # It is assumed that model outputs a single tensor.
+    algorithm=CaptumExplainer('IntegratedGradients'),
+    explanation_type='model',
+    node_mask_type='attributes',
+    edge_mask_type='object',
+    model_config = dict(
+        mode='multiclass_classification',
+        task_level='node',
+        return_type='probs',  # Model returns probabilities.
+    ),
+)
+
+for key, x in hdata.x_dict.items():
+    hdata.x_dict[key] = x.float().requires_grad_()
+
+
+# Generate batch-wise heterogeneous explanations for
+# the nodes at index `1` and `3`:
+hetero_explanation = explainer(
+    hdata.x_dict,
+    hdata.edge_index_dict,
+    index=torch.tensor([1, 3]),
+    allow_unused=True,
+)
+print(hetero_explanation.edge_mask_dict)
+print(hetero_explanation.node_mask_dict)
+
+from torch_geometric.explain import GNNExplainer
+
+# Convert the heterogeneous graph to a homogeneous one
+homogeneous_data = hdata.to_homogeneous()
+
+# Initialize GNNExplainer
+explainer = GNNExplainer(model, return_type='log_prob')  # 'log_prob' for classification tasks
+
+# Run the explainer on the homogeneous graph
+node_feat_mask, edge_mask = explainer.explain_graph(
+    homogeneous_data.x, homogeneous_data.edge_index
+)
 
 !pip install matplotlib  # Install matplotlib if not already installed
 !pip install networkx   # Install networkx for graph visualization if not already installed
