@@ -118,8 +118,12 @@ df_ac_log['week_id'] = df_ac_log['date'].dt.isocalendar().week
 # create year_month_id based on year_id and month_id
 df_ac_log['year_month_id'] = df_ac_log['year_id'].astype(int)*100 + df_ac_log['month_id'].astype(int)
 
-# remove rows with 201709 year_month_id from df_ac_log
-df_ac_log = df_ac_log[df_ac_log['year_month_id'] != 201709]
+from datetime import datetime, timedelta
+print(type(df_ac_log['date']))
+df_ac_log['date1']= pd.to_datetime(df_ac_log['date'])
+
+# remove rows with 20170914 date1 from df_ac_log due to unusual spike
+df_ac_log = df_ac_log[df_ac_log['date1'] != '2017-09-14']
 
 print(df_ac_log.shape)
 
@@ -204,7 +208,7 @@ print(type(df_ac_log['date']))
 df_ac_log['date1']= pd.to_datetime(df_ac_log['date'])
 
 # group dataframe by date1 and ip and get counts per day
-date_counts = df_ac_log.groupby(['date1', 'ip']).size().reset_index(name='count')
+date_counts = df_ac_log.groupby(['date1']).size().reset_index(name='count')
 #date_counts = df_ac_log.groupby('date1').size()
 print(date_counts)
 
@@ -308,11 +312,39 @@ betweenness_centrality = nx.betweenness_centrality(G)
 closeness_centrality = nx.closeness_centrality(G)
 pagerank = nx.pagerank(G)
 
+# top 15 degree_centrality
+top_degree_centrality = sorted(degree_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+print("Top 10 Products by Degree Centrality:")
+for product, centrality in top_degree_centrality:
+    print(f"{product}: {centrality}")
+
+# top 10 betweennes_centrality
+top_betweenness_centrality = sorted(betweenness_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+print("\nTop 10 Products by Betweenness Centrality:")
+for product, centrality in top_betweenness_centrality:
+    print(f"{product}: {centrality}")
+
+
+# top 10 closeness_centrality
+top_closeness_centrality = sorted(closeness_centrality.items(), key=lambda x: x[1], reverse=True)
+print("\nTop 10 Products by Closeness Centrality:")
+for product, centrality in top_closeness_centrality[:10]:
+    print(f"{product}: {centrality}")
+
+# top 10 page_rank
+top_pagerank = sorted(pagerank.items(), key=lambda x: x[1], reverse=True)[:10]
+print("\nTop 10 Products by PageRank:")
+for product, rank in top_pagerank:
+    print(f"{product}: {rank}")
+
+
 # Display results
+"""
 print("Degree Centrality:", degree_centrality)
 print("Betweenness Centrality:", betweenness_centrality)
 print("Closeness Centrality:", closeness_centrality)
 print("PageRank:", pagerank)
+"""
 
 # Visualize the graph
 pos = nx.spring_layout(G, seed=42)
@@ -384,7 +416,11 @@ print("Most similar products to product:", [product_id_to_name[i] for i in most_
 # Add time spent data to centrality scores
 time_spent = df_session_log.groupby("Product")["TimeSpent"].mean()
 weighted_pagerank = {k: v * time_spent.get(k, 1) for k, v in pagerank.items()}
-print("Weighted PageRank:", weighted_pagerank)
+#print("Weighted PageRank:", weighted_pagerank)
+
+# print by weight order
+sorted_weighted_pagerank = sorted(weighted_pagerank.items(), key=lambda x: x[1], reverse=True)
+print("Sorted Weighted PageRank:", sorted_weighted_pagerank)
 
 """Weighted Pagerank of similar products"""
 
@@ -451,9 +487,112 @@ history = model.fit(X_train, y_train, epochs=10, batch_size=32, validation_split
 loss, accuracy = model.evaluate(X_test, y_test)
 print(f"Test Accuracy: {accuracy:.4f}")
 
+"""Define node features"""
+
+#Let's create the User Node, create a subset dataframe.
+# Add user city, access count and buy intent count
+
+access_count = df_ac_log.groupby("ip_id")["ip_id"].count().rename("access_count")
+buy_count = df_ac_log[df_ac_log["AddToCart"] == 1].groupby("ip_id")["AddToCart"].count().rename("buy_count")
+user_node_features = pd.concat([access_count, buy_count], axis=1)
+
+# Remap user ID
+user_node_features = user_node_features.reset_index(drop=False)
+user_node_features.head()
+user_id_mapping = user_node_features['ip_id']
+
+# Only keep user features
+#user_node_features = user_node_features.drop('ip_id', axis=1)
+user_node_features.head()
+
+
+df_ip_city = df_ac_log[['ip_id', 'City', 'State', 'Country']]
+df_ip_city = df_ip_city.drop_duplicates()
+df_ip_city.head()
+
+# merge user_node_features and df_ip_city by ip_id
+df_user_features = pd.merge(user_node_features, df_ip_city, on='ip_id')
+df_user_features = df_user_features.drop_duplicates()
+
+# Only keep user features
+#df_user_features = df_user_features.drop('ip_id', axis=1)
+#df_user_features.head()
+print(df_user_features.shape)
+
+# torch cat the features
+#torch access_count
+access_cnt = df_user_features['access_count']
+access_cnt = torch.tensor(access_cnt, dtype=torch.float).view(-1, 1)
+print(access_cnt.shape)
+
+#torch city
+df_user_features['City'] = df_user_features['City'].astype(str) # Convert cities to a list of strings
+df_user_features['State'] = df_user_features['State'].astype(str) # Convert cities to a list of strings
+
+# torch cities
+city_xs =  [encoder(df_user_features['City'])]
+city_x = torch.cat(city_xs, dim=-1) # Concatenate the encoded results
+print(city_x.shape)
+
+# torch states
+state_xs =  [encoder(df_user_features['State'])]
+state_x = torch.cat(state_xs, dim=-1) # Concatenate the encoded results
+print(state_x.shape)
+
+user_features = torch.cat([city_x, state_x], dim=1)
+print(user_features.shape)
+
+"""Define Product features"""
+
+# get unique department names
+
+df_product_depts = df_ac_log[['Product_Id', 'Department_Id']]
+df_product_depts = df_product_depts.drop_duplicates()
+df_product_depts.head()
+
+# convert x into tensor
+product_features = torch.tensor(df_product_depts['Product_Id'], dtype=torch.float).view(-1,1)
+print(product_features.shape)
+
+#dept_labels = label_encoder.fit_transform(df_product_depts['Department_Id'])
+
+dept_labels = df_product_depts['Department_Id']
+#print(dept_labels)
+#print(len(dept_labels))
+
+dept_labels_tensor = torch.tensor(dept_labels, dtype=torch.float).view(-1, 1)
+product_y = dept_labels_tensor
+
+#print(product_y)
+print(product_y.shape)
+
+# Create a mapping from ip_id to its index in user_features
+user_id_mapping = {ip_id: i for i, ip_id in enumerate(df_user_features['ip_id'])}
+
+# Define a function to retrieve user features from the tensor
+def get_user_features(ip_id):
+    try:
+        index = user_id_mapping[ip_id]
+        return user_features[index]
+    except KeyError:
+        # Handle cases where ip_id is not found in the mapping
+        return torch.zeros_like(user_features[0])  # Or any other default value
+
+# Create a mapping from Product_Id to its index in product_features
+product_id_mapping = {product_id: i for i, product_id in enumerate(df_product_depts['Product_Id'])}
+
+# Define a function to retrieve product features from the tensor
+def get_product_features(product_id):
+    try:
+        index = product_id_mapping[product_id]
+        return product_features[index]
+    except KeyError:
+        # Handle cases where product_id is not found in the mapping
+        return torch.zeros_like(product_features[0])  # Or any other default value
+
 # Combine user and product features with sequences
-df_session_log['UserFeature'] = df_session_log['ip_id'].map(user_features)
-df_session_log['ProductFeature'] = df_session_log['interaction'].map(product_features)
+df_session_log['UserFeature'] = df_session_log['ip_id'].map(get_user_features) # Use get_user_features as the mapping function
+df_session_log['ProductFeature'] = df_session_log['interaction'].map(get_product_features) # This line likely needs a similar fix using a lookup function
 
 """Evaluate the model"""
 
