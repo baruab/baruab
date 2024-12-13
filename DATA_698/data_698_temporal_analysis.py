@@ -9,18 +9,50 @@ Original file is located at
 
 
 
-!pip install --upgrade numpy
+!pip install google-colab geopandas plotnine statsmodels xarray
+!pip install pandas google-colab geopandas plotnine statsmodels xarray
+
 !pip install --upgrade pandas
+!pip install --upgrade numpy
+
+!pip install --upgrade pandas numpy --no-deps
+
+!pip install --upgrade --force-reinstall numpy
+
+!pip install --upgrade --force-reinstall pandas matplotlib scipy seaborn
+
+!pip show numpy pandas matplotlib scipy seaborn
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+print(f"NumPy version: {np.__version__}")
+print(f"Pandas version: {pd.__version__}")
 
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+#to ignore warnings
 import warnings
 warnings.filterwarnings('ignore')
 
 ## In the interest of saving time, calling the API multiple times, as the information is of static nature
 ##   the generated file with added columns is saved and read directly to save compute time
 
+
 access_log_location_url = 'https://raw.githubusercontent.com/baruab/baruab/refs/heads/main/DATA_698/tokenized_access_logs_global.csv'
-df_ac_log = pd.read_csv(access_log_location_url)
+
+# Force pandas to read all columns as strings initially
+df_ac_log = pd.read_csv(access_log_location_url, dtype=str, low_memory=False)
+# Add low_memory=False to handle potential memory issues
+
+# Check the data types of each column
+print(df_ac_log.dtypes)
+
+# Inspect specific problematic columns for unusual values
+# For example, if 'column_name' is suspected:
+# print(df_ac_log['column_name'].unique())
 
 # Drop uplicates
 df_ac_log = df_ac_log.drop_duplicates()
@@ -214,8 +246,6 @@ df_ac_log = df_ac_log.sort_values(by=['Session_ID', 'time'])
 df_ac_log.head()
 df_ac_log.info()
 
-
-
 df_ac_log.head()
 
 """# User based analysis"""
@@ -298,6 +328,11 @@ df_temporal_subset.head()
 !pip install torch-geometric-temporal
 
 !pip install --force-reinstall torch-sparse
+
+from google.colab import files
+uploaded = files.upload()  # Upload the file from your local machine
+
+!mv tsagcn.py /usr/local/lib/python3.10/dist-packages/torch_geometric_temporal/nn/attention
 
 import pandas as pd
 from torch_geometric_temporal.signal import DynamicGraphTemporalSignal
