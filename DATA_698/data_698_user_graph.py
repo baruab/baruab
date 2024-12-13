@@ -413,7 +413,7 @@ clusters = kmeans.fit_predict(reduced_embeddings)
 
 # Visualize clusters
 plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=clusters, cmap='coolwarm')
-plt.title("User Clusters")
+plt.title("User Clusters (Buying vs Drop-offs)")
 
 # add legend
 plt.legend(['Buying User', 'Drop-offs'])
@@ -448,24 +448,52 @@ print(session_df[session_df['Drop_Off'] == 1]['Session_ID'].nunique())
 
 print(df_user_segmentation.shape)
 
+df_user_5kseg = df_user_segmentation.head(5000)
+
+print(df_user_5kseg.head(5))
+
+# city df_user_5kseg
+city_labels = pd.Series(df_user_5kseg['City'], index=df_user_5kseg['ip_id'])
+
+print(city_labels.shape)
+
+# Map cities to unique colors
+# unique city from df_user_5kseg
+city_labels = df_user_5kseg['City']
+# unique city
+unique_cities = city_labels.unique()
+print(city_labels.shape)
+print(unique_cities.shape)
+
+city_to_color = {city: color for city, color in zip(unique_cities, plt.cm.tab10.colors)}
+colors = city_labels.map(city_to_color)
+print(colors.shape)
+print(colors)
+
 # Initialize a graph
 G = nx.Graph()
 
 # Add nodes for each user
-for _, row in df_user_segmentation.iterrows():
+for _, row in df_user_5kseg.iterrows():
     G.add_node(row['ip_id'], city=row['City'])
 
 # Add edges based on shared purchases
-for product, group in df_user_segmentation.groupby('Product_Id'):
+for product, group in df_user_5kseg.groupby('Product_Id'):
     users = group['ip_id'].tolist()
+
+    #print len users
+    print("len(users): ",len(users))
+
     for i in range(len(users)):
         for j in range(i + 1, len(users)):
             G.add_edge(users[i], users[j], type='shared_purchase', weight=1)
 
-"""
+#print len df_user_5kseg
+print("len(df_user_5kseg): ", len(df_user_5kseg))
+
 # Add edges based on geographic proximity
-for i, user1 in df_user_segmentation.iterrows():
-    for j, user2 in df_user_segmentation.iterrows():
+for i, user1 in df_user_5kseg.iterrows():
+    for j, user2 in df_user_5kseg.iterrows():
         if i < j:
             # Calculate geographic distance
             loc1 = user1['City']
@@ -473,12 +501,15 @@ for i, user1 in df_user_segmentation.iterrows():
 
             if loc1 == loc2:  # Same city
                 G.add_edge(user1['ip_id'], user2['ip_id'], type='geo_proximity', weight=1)
-"""
+
 
 # Print graph nodes and edges
-
-
-#print(nx.info(G))
+print("Nodes:", G.nodes())
+print("Edges:", G.edges(data=True))
+# num nodes
+print("Number of nodes:", G.number_of_nodes())
+# num edges
+print("Number of edges:", G.number_of_edges())
 
 """Learn Node Representation"""
 
@@ -520,7 +551,54 @@ plt.figure(figsize=(10, 6))
 plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=clusters, cmap='coolwarm', alpha=0.8)
 for i, user in enumerate(embeddings.index):
     plt.annotate(user, (reduced_embeddings[i, 0], reduced_embeddings[i, 1]))
-plt.title("User Segments Based on Shared Purchases")
+plt.title("User Segments Based on Shared Purchases and Same City")
 plt.xlabel("PCA Dimension 1")
 plt.ylabel("PCA Dimension 2")
 plt.show()
+
+# Plot the scatter plot
+# Handle NaN values in 'colors'
+
+colors_subset = []
+for user in embeddings.index:
+    city = df_user_5kseg.loc[df_user_5kseg['ip_id'] == user, 'City'].iloc[0]
+    # Check if the city is in the dictionary, otherwise use a default color
+    color = city_to_color.get(city, 'gray')  # Use 'gray' as default color
+    colors_subset.append(color)
+
+# Convert RGB tuples to valid color format (if necessary)
+colors_subset = [tuple(c) if isinstance(c, (tuple, list)) and len(c) in (3, 4) else c for c in colors_subset]
+
+plt.figure(figsize=(10, 6))
+scatter = plt.scatter(
+    reduced_embeddings[:, 0],
+    reduced_embeddings[:, 1],
+    c=colors_subset,  # Use city-based colors for the subset of users
+    alpha=0.8,
+    s=100
+)
+
+# Add annotations for users
+for i, user in enumerate(embeddings.index):
+    plt.annotate(user, (reduced_embeddings[i, 0], reduced_embeddings[i, 1]), fontsize=9)
+
+# Add a legend for cities
+legend_elements = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, markersize=10, label=city)
+                   for city, color in city_to_color.items()]
+plt.legend(handles=legend_elements, title="Cities", loc='best')
+
+# Add titles and labels
+plt.title("User Segments by City buying same Products")
+plt.xlabel("PCA Dimension 1")
+plt.ylabel("PCA Dimension 2")
+plt.show()
+
+from sklearn.cluster import KMeans
+cluster_centers = pca.transform(kmeans.cluster_centers_)
+plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='black', marker='x', label='Centroids')
+plt.legend()
+
+import plotly.express as px
+fig = px.scatter(x=reduced_embeddings[:, 0], y=reduced_embeddings[:, 1],
+                 color=clusters, text=embeddings.index)
+fig.show()
