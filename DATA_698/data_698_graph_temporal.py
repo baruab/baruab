@@ -121,6 +121,15 @@ df_ac_log['week_id'] = df_ac_log['date'].dt.isocalendar().week
 # create year_month_id based on year_id and month_id
 df_ac_log['year_month_id'] = df_ac_log['year_id'].astype(int)*100 + df_ac_log['month_id'].astype(int)
 
+
+from datetime import datetime, timedelta
+print(type(df_ac_log['date']))
+df_ac_log['date1']= pd.to_datetime(df_ac_log['date'])
+# remove rows with 20170914 date1 from df_ac_log due to unusual spike
+df_ac_log = df_ac_log[df_ac_log['date1'] != '2017-09-14']
+
+print(df_ac_log.shape)
+
 # Reassign the year_month_id to snapshot_ID (make it easier later for splitting graphs)
 
 year_months = df_ac_log['year_month_id'].unique()
@@ -132,6 +141,9 @@ df_ac_log['snapshot_id'] = df_ac_log['year_month_id'].map(map_snapshot)
 
 # Merge date and ip columns to create new column in df_ac_log
 df_ac_log['date_ip_id'] = df_ac_log['date'].astype(str) + '_' + df_ac_log['ip_id'].astype(str)
+
+# sort df_ac_log by date_ip_id and date1
+df_ac_log = df_ac_log.sort_values(by=['date_ip_id', 'date1'])
 
 access_count = df_ac_log.groupby("ip_id")["date_id"].count().rename("access_count")
 print(access_count)
@@ -299,10 +311,10 @@ hdata['product'].x = product_x
 hdata['product'].ids = product_ids
 hdata['product'].y = product_y   # dept label
 
-print(hdata)
-print(hdata.snapshot_id)
-print(hdata.year_month_id)
-print(hdata.week_id)
+#print(hdata)
+#print(hdata.snapshot_id)
+#print(hdata.year_month_id)
+#print(hdata.week_id)
 
 """# Create Temporal Datasets"""
 
@@ -326,10 +338,10 @@ print("Torch version:", torch.__version__)
 print("PyTorch Geometric version:", torch_geometric.__version__)
 #print("PyTorch Geometric Temporal version:", torch_geometric_temporal.__version__)
 
-#from google.colab import files
-#uploaded = files.upload()  # Upload the file from your local machine
+from google.colab import files
+uploaded = files.upload()  # Upload the file from your local machine
 
-#!mv tsagcn.py /usr/local/lib/python3.10/dist-packages/torch_geometric_temporal/nn/attention
+!mv tsagcn.py /usr/local/lib/python3.10/dist-packages/torch_geometric_temporal/nn/attention
 
 import torch # Import the torch module
 from datetime import datetime # Import the datetime module from the datetime library
@@ -577,11 +589,6 @@ for snapshot_features in node_features:
 
     node_features_list.append(all_features)
 
-from google.colab import files
-uploaded = files.upload()  # Upload the file from your local machine
-
-!mv tsagcn.py /usr/local/lib/python3.10/dist-packages/torch_geometric_temporal/nn/attention
-
 #!pip install torch_geometric_temporal
 import numpy as np
 import torch
@@ -686,38 +693,7 @@ for snapshot in train_dataset:
     # Print the shape with the feature kind if it's a tensor
     # print(f"Features: {x_t.shape}, Edge Indices: {edge_index_t.shape}, Targets: {y_t.shape}, Feature Kind: {feature_kind}")
 
-"""#  Define Temporal Graph Neural Network (TGN) model
-
-import torch
-from torch.nn import Linear, Module
-from torch_geometric_temporal.nn.recurrent import GConvGRU
-
-class TemporalGNN(Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
-        super(TemporalGNN, self).__init__()
-        self.recurrent = GConvGRU(in_channels, hidden_channels, 1)  # in_channels=1
-        self.linear = Linear(hidden_channels, out_channels)  # Final classifier
-
-    def forward(self, x, edge_index, edge_weight=None, h=None):
-        # Ensure edge_index is within the bounds of the node features
-        num_nodes = x.shape[0]
-        edge_index = edge_index[:, (edge_index < num_nodes).all(dim=0)]
-
-        # Handle no valid edges
-        if edge_index.shape[1] == 0:
-            if h is None:
-                h = torch.zeros((num_nodes, self.recurrent.out_channels), device=x.device)
-            return self.linear(h), h
-
-        # GConvGRU forward pass
-        x = x.unsqueeze(0)  # Add batch dimension: (1, num_nodes, in_channels)
-        h = self.recurrent(x, edge_index, edge_weight, h)  # Updated hidden state
-        h = h.squeeze(0)  # Remove batch dimension: (num_nodes, hidden_channels)
-
-        # Linear layer for output
-        out = self.linear(h)  # (num_nodes, out_channels)
-        return out, h
-"""
+"""#  Define RecurrentGCN (RGCN) model"""
 
 import torch
 import torch.nn.functional as F  # Import F for relu
