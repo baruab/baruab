@@ -7,8 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1Rls0WFZ8J5VPBCzbu_fARwCmQeFS36Bi
 """
 
-
-
 !pip install google-colab geopandas plotnine statsmodels xarray
 !pip install pandas google-colab geopandas plotnine statsmodels xarray
 
