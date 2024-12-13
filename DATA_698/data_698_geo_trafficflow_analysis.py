@@ -254,7 +254,7 @@ transitions = df_session_log.dropna(subset=['NextProduct'])
 
 # Create a subset of df_geo_subset with User_ID  Product_ID Interaction
 df_geo_subset = df_session_log[['ip_id', 'Session_ID','City', 'Country', 'Product_Id', 'AddToCart',  'interaction']]
-df_geo_subset.head()
+df_geo_subset.head(25)
 
 # Group by Session_ID and aggregate
 geo_df = df_session_log.groupby('Session_ID').agg(
@@ -376,7 +376,7 @@ for time_window in sorted(geo_df['Session_ID'].unique()):
     weights = snapshot['InteractionCount'].tolist()  # Edge weights
     edge_indices.append(edges)
     edge_weights.append(weights)
-    node_features.append([])  # Add node features if available
+    node_features.append(snapshot['num_buy'])  # Add node features if available
 
 
 class MyDynamicGraphTemporalSignal(DynamicGraphTemporalSignal):
@@ -589,7 +589,7 @@ def predict_next_product(sequence, model, vocab, reverse_vocab):
     return reverse_vocab[predicted_index]
 
 reverse_vocab = {idx: product for product, idx in vocab.items()}
-print(predict_next_product([16, 17], model, vocab, reverse_vocab))
+print(predict_next_product([43, 62], model, vocab, reverse_vocab))
 
 import matplotlib.pyplot as plt
 
