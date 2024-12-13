@@ -28,7 +28,47 @@ if ram_gb < 20:
 else:
   print('You are using a high-RAM runtime!')
 
-!pip install torch-geometric==2.0.4
+import torch
+
+def format_pytorch_version(version):
+  return version.split('+')[0]
+
+TORCH_version = torch.__version__
+TORCH = format_pytorch_version(TORCH_version)
+
+def format_cuda_version(version):
+  return 'cu' + version.replace('.', '')
+
+CUDA_version = torch.version.cuda
+CUDA = format_cuda_version(CUDA_version)
+
+print('PyTorch version:', TORCH)
+print('CUDA version:', CUDA)
+
+"""
+import torch
+
+def format_pytorch_version(version):
+  return version.split('+')[0]
+
+TORCH_version = torch.__version__
+TORCH = format_pytorch_version(TORCH_version)
+
+def format_cuda_version(version):
+  return 'cu' + version.replace('.', '')
+
+CUDA_version = torch.version.cuda
+CUDA = format_cuda_version(CUDA_version)
+
+!pip install torch-scatter     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-sparse      -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+#!pip install torch-cluster     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+#!pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-geometric-temporal -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+!pip install torch-geometric
+#!pip install torch-geometric==2.0.4
+
+"""
 
 import pandas as pd
 import numpy as np
@@ -485,6 +525,8 @@ df_product = df_product.reset_index(drop=True)
 df_product.head()
 print(len(df_product))
 
+df_product.head()
+
 # Create a dictionary to store node features
 node_features = {}
 
@@ -595,6 +637,26 @@ product_y = dept_labels_tensor
 print(product_y.shape)
 #data['product'].x = product_features
 
+df_product_4features = df_ac_log[['Product','Product_Id','Department', 'Department_Id']]
+# drop duplicates
+df_product_4features = df_product_4features.drop_duplicates()
+df_product_4features.head()
+
+# torch cat the features
+product_4features = torch.cat([product_features, product_y, product_features, product_y], dim=1)
+#print(product_4features)
+print(product_4features.shape)
+
+# torch cat the product.Y features
+product_Y4features = torch.cat([product_y, product_y, product_y, product_y], dim=1)
+#print(product_4features)
+print(product_Y4features.shape)
+
+# subset df_product_4features using Product_Id
+# subset based  Product_Id 16, 17
+df_sel_products = df_product_4features[df_product_4features['Product_Id'].isin([16, 17,11,23,7,60,31,2,15,31,43,62,9])]
+df_sel_products.head(15)
+
 """# **Create User Node and Features**"""
 
 # group by ip_id and city
@@ -701,6 +763,8 @@ print(user_y)
 print(user_features.shape)
 #print(product_features)
 print(product_features.shape)
+
+### Additional product features
 
 #print(len(df_product_1hotfeatures))
 print(len(user_y))
@@ -1028,6 +1092,38 @@ print(hdata['product'].x.shape)
 RGCNConv is designed to handle graphs with multiple edge types by parameterizing transformations based on relations. This layer aggregates neighborhood information based on the edge type, making it suitable for relational data.
 """
 
+edge_index_dict = {
+    ('user', 'buy', 'product'): hdata['user', 'buy', 'product'].edge_index,
+    ('user', 'view', 'product'): hdata['user', 'view', 'product'].edge_index
+}
+print(edge_index_dict)
+print(type(edge_index_dict))
+print(edge_index_dict.keys())
+
+# get size of dict
+# iterate dict values
+for key, value in edge_index_dict.items():
+    print(key, value.shape)
+
+# get values from dict using key
+print(edge_index_dict[('user', 'buy', 'product')])
+
+#print(edge_index_dict.shape)
+
+print(type(edge_index_dict))
+x_dict = {
+    'user': hdata['user'].x,
+    'product': hdata['product'].x
+}
+
+
+print(edge_index_dict)
+
+# get the first element from edge_index_dict
+edge_index = edge_index_dict[('user', 'buy', 'product')]
+print(edge_index)
+print(edge_index.shape)
+
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import RGCNConv
@@ -1046,24 +1142,34 @@ class RGCN_HeteroGNN(torch.nn.Module):
 
     def forward(self, x_dict, edge_index_dict, edge_type):
         # Get the user node features
-        x = x_dict['user']
+        # x = x_dict['user']
 
         # First convolutional layer with activation
         # Pass edge_index_dict and edge_type to RGCNConv
         # Slice edge_type to match the number of edges in the current relation
-        num_edges = edge_index_dict[('user', 'buy', 'product')].shape[1]
-        edge_type_sliced = edge_type[:num_edges]
+      #  num_edges = edge_index_dict[('user', 'buy', 'product')].shape[1]
+       # edge_index = edge_index_dict[('user', 'buy', 'product')] # Get the specific edge_index for 'buy' relation
 
-        x = self.conv1(x, edge_index_dict[('user', 'buy', 'product')], edge_type_sliced)
+        # Access edge_index_dict using the correct key
+        edge_index = edge_index_dict  # Use edge_index_dict directly
+
+        # Get the number of edges from the edge index tensor
+        # num_edges = edge_index.shape[1]  # No need to get num_edges here
+
+        # edge_type_sliced = edge_type[:num_edges]  # No need to slice edge_type
+
+
+        x = self.conv1(x_dict['user'], edge_index, edge_type)  # Pass edge_index_dict instead of edge_index
         x = F.relu(x)
-        print("num_edges:", num_edges)
-        print("edge_type_sliced =", edge_type_sliced)
-        print("Output after first RGCNConv layer:", x.shape)
+        # print("edge_index:", edge_index)
+        #print("num_edges:", num_edges)
+        #print("edge_type_sliced =", edge_type_sliced)
+        #print("Output after first RGCNConv layer:", x.shape)
 
         # Second convolutional layer
         # Pass edge_index_dict and edge_type to RGCNConv
         # Slice edge_type to match the number of edges in the current relation (assuming same as 'buy')
-        x = self.conv2(x, edge_index_dict[('user', 'buy', 'product')], edge_type_sliced)
+        x = self.conv2(x, edge_index, edge_type)  # Pass edge_index_dict instead of edge_index
         print("Output after second RGCNConv layer:", x.shape)
 
         return x
@@ -1074,8 +1180,10 @@ class RGCN_HeteroGNN(torch.nn.Module):
 in_channels = hdata['user'].x.size(-1)       # Input channels for user nodes
 
 print("in_channels count =" , in_channels)
-hidden_channels = 32
-out_channels = 32
+print("in_channels =" , hdata['user'].x)
+
+hidden_channels = 16
+out_channels = 8
 num_relations = 1  # Two relations: viewed and bought
 
 edge_type = []
@@ -1095,14 +1203,15 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 criterion = torch.nn.CrossEntropyLoss()
 
 # Forward pass
-#model.train()
+model.train()
+out = model(x_dict, edge_index, edge_type)
+print("Final output:", out)
+print(out.shape)
+print("User node embeddings:" , out[0])
+#print("Product node embeddings:" , out[1])
 
 
-#out = model(x, edge_index, edge_type)
-#print("Final output:", out)
-
-print(edge_index)
-print(edge_type)
+# evaluate out
 
 edge_index_dict = {
     ('user', 'buy', 'product'): hdata['user', 'buy', 'product'].edge_index,
@@ -1124,9 +1233,10 @@ print(edge_index_dict[('user', 'buy', 'product')])
 
 print(hdata['user'].y.shape)
 
-# Define the number of epochs
-num_epochs = 10
+"""# RGCN_HeteroGNN model training loop"""
 
+# Define the number of epochs
+num_epochs = 100
 
 
 # Training loop
@@ -1137,12 +1247,12 @@ for epoch in range(num_epochs):
     optimizer.zero_grad()
 
     # Forward pass
-    out = model(hdata.x_dict, edge_index_dict, edge_type)  # Predict on 'user' nodes or specific node type
+    out = model(x_dict, edge_index, edge_type)  # Predict on 'user' nodes or specific node type
 
     # Select the target labels and nodes (for user nodes here)
     y_true = hdata['user'].y  # True labels for user nodes
 
-    y_true = torch.clamp(y_true, 0, 29)
+    y_true = torch.clamp(y_true, 0, 7)
 
     # **Reshape the target tensor to 1D**
     y_true = y_true.squeeze(1)  # Remove the extra dimension
@@ -1155,7 +1265,10 @@ for epoch in range(num_epochs):
     loss.backward()
     optimizer.step()
 
-    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item():.4f}")
+    #print accuracy
+    _, predicted = torch.max(out, 1)
+    accuracy = (predicted == y_true).sum().item() / len(y_true)
+    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item():.4f}, Accuracy: {accuracy:.4f}")
 
 """predictions contains the predicted class labels for each node."""
 
@@ -1173,7 +1286,7 @@ print(predictions.min())
 
 """Edge Classification
 
-edge_logit is the score for each edge indicating the likelihood of the presence/type of a relation between the nodes.
+edge_logit is the score for buy edge indicating the likelihood of the buy relation between the nodes.
 """
 
 # Example for edge classification
@@ -1185,6 +1298,104 @@ edge_logits = torch.sigmoid(edge_embeddings.sum(dim=1))    # Sigmoid if binary c
 print(edge_logits)
 print(edge_logits.shape)
 # If using a more complex setup, you might pass `edge_embeddings` to another neural network layer
+
+"""# F1 score calculation
+
+from sklearn.metrics import precision_score, recall_score, f1_score
+
+precision = precision_score(y_true, y_pred, average='weighted')
+recall = recall_score(y_true, y_pred, average='weighted')
+f1 = f1_score(y_true, y_pred, average='weighted')
+print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1-Score: {f1:.4f}")
+"""
+
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import torch
+
+# Define the device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Map edge types to numerical indices
+edge_type_mapping = {edge: idx for idx, edge in enumerate(hdata.edge_index_dict.keys())}
+
+# Flatten edge indices and assign edge types
+"""
+edge_index_list = []
+edge_type_list = []
+
+for edge_type, edge_index in hdata.edge_index_dict.items():
+    edge_index_list.append(edge_index)
+    edge_type_list.append(torch.full((edge_index.size(1),), edge_type_mapping[edge_type]))
+
+# Combine all edges and types
+edge_index = torch.cat(edge_index_list, dim=1).to(device)
+edge_types = torch.cat(edge_type_list, dim=0).to(device)
+"""
+
+# Debugging checks
+print(f"Unique edge types: {torch.unique(edge_types)}")
+print(f"Number of relation types: {len(edge_type_mapping)}")
+print(f"Edge types: {edge_types}")
+
+print(f"Edge index shape 111: {edge_index.shape}")
+print(f"Edge types shape 111: {edge_types.shape}")
+
+edge_index_list = []
+edge_type_list = []
+
+for edge_type, edge_index in hdata.edge_index_dict.items():
+    edge_index_list.append(edge_index)
+    edge_type_list.append(torch.full((edge_index.size(1),), edge_type_mapping[edge_type]))
+
+# Combine edges and types
+edge_index = torch.cat(edge_index_list, dim=1)
+edge_types = torch.cat(edge_type_list, dim=0)
+
+print(f"Edge index shape 222: {edge_index.shape}")
+print(f"Edge types shape 222: {edge_types.shape}")
+
+print(f"Unique edge types: {torch.unique(edge_types)}")
+
+# Ensure edge types are within valid bounds
+edge_types = torch.clamp(edge_types, 0, len(edge_type_mapping) - 1)
+
+# Set model to evaluation mode
+model.eval()
+
+with torch.no_grad():
+    # Move node features to the device
+    x_dict = {key: value.to(device) for key, value in hdata.x_dict.items()}
+
+    # Forward pass
+    test_out = model(x_dict, edge_index, edge_types)
+
+    # Predictions
+    test_pred = test_out.argmax(dim=1)
+
+# Extract true labels
+test_y_true = hdata['user'].y.to(device)
+
+# Filter out NaN labels (if necessary)
+if torch.isnan(test_y_true).any():
+    mask = ~torch.isnan(test_y_true)
+    test_y_true = test_y_true[mask]
+    test_pred = test_pred[mask]
+
+# Convert tensors to numpy arrays for scikit-learn metrics
+test_pred = test_pred.cpu().numpy()
+test_y_true = test_y_true.cpu().numpy()
+
+# Calculate metrics
+accuracy = accuracy_score(test_y_true, test_pred)
+precision = precision_score(test_y_true, test_pred, average='weighted')
+recall = recall_score(test_y_true, test_pred, average='weighted')
+f1 = f1_score(test_y_true, test_pred, average='weighted')
+
+# Print metrics
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1-Score: {f1:.4f}")
 
 """Link Prediction
 
@@ -1213,7 +1424,40 @@ print(len(link_scores))
 
 print(out[0])
 
-"""Another HeteroGNN implementation, using SAGE convolution"""
+"""# Another HeteroGNN implementation, using SAGE convolution"""
+
+# Import the necessary library
+from torch_geometric.data import HeteroData
+
+hp4data = HeteroData()
+hp4data['user'].num_nodes = len(user_node_features)
+hp4data['user'].x = user_features
+hp4data['user'].ids = user_ids
+hp4data['user'].y = user_y
+
+
+hp4data['product'].num_nodes = len(df_product_1hotfeatures)
+hp4data['product'].x = product_4features
+product_ids = torch.tensor(df_product_1hotfeatures['Product_Id'].values, dtype=torch.long)
+hp4data['product'].ids = product_ids
+hp4data['product'].y =  product_Y4features # product_y
+
+hp4data['user', 'buy', 'product'].edge_index = buy_edge_index
+
+# Edge attribute AddToCart
+hp4data['user', 'buy', 'product'].edge_attr = torch.tensor(df_ac_log['AddToCart'].values, dtype=torch.float)
+
+
+
+print(hp4data)
+print(hp4data['user'].x.size(0))
+#print(hp4data.x_dict)
+
+print(edge_index_dict)
+print(hp4data)
+
+print(hp4data.x_dict)
+print(hp4data.edge_index_dict)
 
 import torch
 import torch.nn.functional as F
@@ -1228,12 +1472,12 @@ class HeteroGNN(torch.nn.Module):
         # Use SAGEConv for both edge types, as it supports bipartite message passing
         self.conv1 = HeteroConv({
             ('user', 'buy', 'product'): SAGEConv((user_in_channels, product_in_channels), hidden_channels),  # SAGEConv used here
-            ('user', 'view', 'product'): SAGEConv((user_in_channels, product_in_channels), hidden_channels)  # SAGEConv used here
+            ('product', 'bought_by', 'user'): SAGEConv((user_in_channels, product_in_channels), hidden_channels)  # SAGEConv used here
         }, aggr='sum')
 
         self.conv2 = HeteroConv({
             ('user', 'buy', 'product'): SAGEConv((hidden_channels, hidden_channels), out_channels),  # SAGEConv used here
-            ('user', 'view', 'product'): SAGEConv((hidden_channels, hidden_channels), out_channels)  # SAGEConv used here
+            ('product', 'bought_by', 'user'): SAGEConv((hidden_channels, hidden_channels), out_channels)  # SAGEConv used here
         }, aggr='sum')
 
 
@@ -1247,10 +1491,9 @@ class HeteroGNN(torch.nn.Module):
         # In such cases, keep the original features
         for node_type in x_dict:
             if x_dict[node_type] is None:
-                # Keep original features instead of None
-                x_dict[node_type] = x_dict[node_type]
+                print(f"Warning: Features for node type '{node_type}' are None after the first layer.")
 
-        x_dict = {key: F.relu(x) if x is not None else x_dict[key] for key, x in x_dict.items()}  # Handle potential None values
+        x_dict = {key: F.relu(x) for key, x in x_dict.items()}  # Handle potential None values
         print("Output after first HeteroConv layer:", x_dict)
 
         # Apply the second layer of convolutions
@@ -1272,16 +1515,16 @@ class HeteroGNN(torch.nn.Module):
 
 
 in_channels_dict = {
-    'user': hdata['user'].x.size(1),  # Replace with the actual input feature dimension for 'user'
-    'product': hdata['product'].x.size(1)  # Replace with the actual input feature dimension for 'product' , Take the first dimension of the tensor for product input channels
+    'user': hp4data['user'].x.size(1),  # Replace with the actual input feature dimension for 'user'
+    'product': hp4data['product'].x.size(1)  # Replace with the actual input feature dimension for 'product' , Take the first dimension of the tensor for product input channels
 }
 
 # Assuming you have your HeteroData object prepared as `hdata`
-hidden_channels = hdata['user'].x.size(1)  # 32  # Example value for hidden channels
-out_channels = hdata['user'].y.size(1)  # For example, if doing 3-class classification
+hidden_channels = hp4data['user'].x.size(1)  # 32  # Example value for hidden channels
+out_channels = hp4data['user'].y.size(1)  #  8 # For example, if doing 3-class classification
 
-user_in_channels = hdata['user'].x.size(1)
-product_in_channels = hdata['product'].x.size(1)
+user_in_channels = hp4data['user'].x.size(0)
+product_in_channels = hp4data['product'].x.size(0)
 
 print(f"User in_channels: {user_in_channels}")
 print(f"Product in_channels: {product_in_channels}")
@@ -1291,14 +1534,17 @@ model = HeteroGNN(user_in_channels, product_in_channels, hidden_channels=hidden_
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
 print(model)
-print("User node feature shape:", hdata['user'].x.shape)
-print("Product node feature shape:", hdata['product'].x.shape)
-print("Edge index for 'user'-'buy'-'product':", hdata['user', 'buy', 'product'].edge_index.shape)
-print("Edge index for 'user'-'view'-'product':", hdata['user', 'view', 'product'].edge_index.shape)
+
+print("input channels =", user_in_channels)
+print("product input channels =", product_in_channels)
+
+print("hidden channels =", hidden_channels)
+print("out channels =", out_channels)
+
 
 # Forward pass
 model.train()
-out = model(hdata.x_dict, hdata.edge_index_dict)
+out = model(hp4data.x_dict, hp4data.edge_index_dict)
 print("Model output:", out)
 
 """**Build the 'Old version' Heterogeneous graph data object; May not be used ---**
@@ -1622,7 +1868,7 @@ split_dataframes = []
 
 # Iterate the Split_df list
 #for i in range(len(split_dfs)):
-for i in range(1,2):
+for i in range(1,100):
 
   split_dfs[i] = split_dfs[i].sort_values(by='time')
   # Convert 'time' column to datetime objects
@@ -1722,6 +1968,7 @@ for i in range(1,2):
 
 !pip install torch-geometric-temporal
 
+"""
 import torch
 
 def format_pytorch_version(version):
@@ -1743,13 +1990,23 @@ CUDA = format_cuda_version(CUDA_version)
 !pip install torch-geometric-temporal -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
 !pip install torch-geometric
 
+"""
+
+!pip install torch-geometric-temporal
+
+from google.colab import files
+uploaded = files.upload()  # Upload the file from your local machine
+
+!mv tsagcn.py /usr/local/lib/python3.10/dist-packages/torch_geometric_temporal/nn/attention
+
 import torch
 import torch.nn.functional as F
 
-"""
+
 # Correct import statement
 from torch_geometric_temporal.signal import temporal_signal_split
-from torch_geometric_temporal.nn.tgn import TGNMemory, TGN
+from torch_geometric_temporal.nn import TGN
+#from torch_geometric_temporal.nn import  TGN #TGNMemory #,
 from torch_geometric.nn import TransformerConv
 
 # Define a custom module with the out_channels attribute
@@ -1815,12 +2072,10 @@ class TGNModel(torch.nn.Module):
 
         return out  # List of outputs for each snapshot
 
-"""
-
 """ Train and Evaluate the Model"""
 
 # Initialize model, optimizer, and loss function
-model = TGNModel(num_nodes, embedding_dim=32, memory_dim=64, num_layers=2, out_channels=16)
+model = TGNModel(2, embedding_dim=32, memory_dim=64, num_layers=2, out_channels=16)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 loss_fn = torch.nn.BCEWithLogitsLoss()
 #criterion = torch.nn.MSELoss()
